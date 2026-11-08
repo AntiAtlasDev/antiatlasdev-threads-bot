@@ -1,9 +1,12 @@
 
 import os
+import json
+import subprocess
 import requests
 import xml.etree.ElementTree as ET
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
+HISTORY_FILE = "used_articles.json"
 
 
 def get_articles():
@@ -13,8 +16,6 @@ def get_articles():
             headers={"User-Agent": "AntiAtlasDevThreadsBot/1.0"},
             timeout=30
         )
-
-        print("RSS HTTP status:", response.status_code)
         response.raise_for_status()
 
         root = ET.fromstring(response.content)
@@ -32,25 +33,50 @@ def get_articles():
                     "link": link
                 })
 
+        print("Total articles:", len(articles))
         return articles
 
-    except (requests.RequestException, ET.ParseError) as error:
-        print("RSS error:", str(error))
+    except Exception as error:
+        print("RSS error:", error)
         return []
 
 
-def select_article(articles):
-    if not articles:
+def load_history():
+    if not os.path.exists(HISTORY_FILE):
+        return []
+
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except (json.JSONDecodeError, OSError):
+        print("History file could not be read.")
+        return []
+
+
+def save_history(history):
+    with open(HISTORY_FILE, "w", encoding="utf-8") as file:
+        json.dump(history, file, ensure_ascii=False, indent=2)
+
+
+def select_article(articles, history):
+    unused = [
+        article for article in articles
+        if article["link"] not in history
+    ]
+
+    if not unused:
+        print("All articles have been used.")
+        print("Starting a new cycle.")
+        history.clear()
+        unused = articles
+
+    if not unused:
         return None
 
-    run_number = int(os.environ.get("GITHUB_RUN_NUMBER", "1"))
+    article = unused[0]
+    history.append(article["link"])
 
-    index = (run_number - 1) % len(articles)
-
-    print("Total articles:", len(articles))
-    print("Selected article number:", index + 1)
-
-    return articles[index]
+    return article
 
 
 def prepare_post(article):
@@ -60,12 +86,62 @@ def prepare_post(article):
     )
 
 
+def commit_history():
+    try:
+        subprocess.run(
+            ["git", "config", "user.name", "AntiAtlasDev Bot"],
+            check=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "bot@antiatlasdev.com"],
+            check=True
+        )
+
+        subprocess.run(
+            ["git", "add", HISTORY_FILE],
+            check=True
+        )
+
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"]
+        )
+
+        if result.returncode == 1:
+            subprocess.run(
+                ["git", "commit", "-m", "Update used articles history"],
+                check=True
+            )
+            subprocess.run(
+                ["git", "push"],
+                check=True
+            )
+            print("Article history saved to GitHub.")
+
+        elif result.returncode == 0:
+            print("No history changes to save.")
+
+        else:
+            raise RuntimeError("Git diff failed.")
+
+    except Exception as error:
+        print("Git history save error:", error)
+        raise
+
+
 if __name__ == "__main__":
     print("AntiAtlasDev Threads Bot")
     print("Mode: DRY RUN - No publishing")
 
     articles = get_articles()
-    article = select_article(articles)
+
+    if not articles:
+        print("No articles available. Stopping.")
+        raise SystemExit(1)
+
+    history = load_history()
+    print("Previously used articles:", len(history))
+
+    article = select_article(articles, history)
 
     if article:
         draft = prepare_post(article)
@@ -78,7 +154,8 @@ if __name__ == "__main__":
         print(draft)
         print("------------------------------")
 
+        save_history(history)
+        commit_history()
+
         print("\nDry run completed successfully.")
         print("Nothing was published.")
-    else:
-        print("No articles available.")
