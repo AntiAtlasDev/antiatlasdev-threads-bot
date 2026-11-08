@@ -1,44 +1,70 @@
 
-import os
 import requests
+import xml.etree.ElementTree as ET
 
-GRAPH_URL = "https://graph.threads.net"
-ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN")
+RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 
 
-def check_token():
-    if not ACCESS_TOKEN:
-        print("ERROR: THREADS_ACCESS_TOKEN is not configured.")
-        return False
-
+def get_latest_post():
     try:
         response = requests.get(
-            f"{GRAPH_URL}/v1.0/me",
-            params={
-                "fields": "id,username",
-                "access_token": ACCESS_TOKEN
-            },
+            RSS_URL,
+            headers={"User-Agent": "AntiAtlasDevThreadsBot/1.0"},
             timeout=30
         )
 
-        print("HTTP status:", response.status_code)
+        print("RSS HTTP status:", response.status_code)
+        response.raise_for_status()
 
-        if response.ok:
-            data = response.json()
-            print("Connected Threads account:", data.get("username"))
-            return True
+        root = ET.fromstring(response.content)
+        item = root.find("./channel/item")
 
-        print("Threads API error:", response.text[:500])
-        return False
+        if item is None:
+            print("No articles found in RSS feed.")
+            return None
 
-    except requests.RequestException as error:
-        print("Connection error:", str(error))
-        return False
+        title = item.findtext("title", default="Untitled").strip()
+        link = item.findtext("link", default="").strip()
+
+        if not link:
+            print("Article link is missing.")
+            return None
+
+        return {
+            "title": title,
+            "link": link
+        }
+
+    except (requests.RequestException, ET.ParseError) as error:
+        print("RSS error:", str(error))
+        return None
+
+
+def prepare_post(article):
+    return (
+        f"New on AntiAtlasDev: {article['title']}\n\n"
+        f"Read more: {article['link']}"
+    )
 
 
 if __name__ == "__main__":
-    if check_token():
-        print("Threads connection test successful.")
+    print("AntiAtlasDev Threads Bot")
+    print("Mode: DRY RUN - No publishing")
+
+    article = get_latest_post()
+
+    if article:
+        draft = prepare_post(article)
+
+        print("\nArticle found:")
+        print(article["title"])
+
+        print("\nPrepared Threads post:")
+        print("------------------------------")
+        print(draft)
+        print("------------------------------")
+
+        print("\nDry run completed successfully.")
+        print("Nothing was published.")
     else:
-        print("Threads connection test failed.")
-      
+        print("\nCould not prepare a post.")
