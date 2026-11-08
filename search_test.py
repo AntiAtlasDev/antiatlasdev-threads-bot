@@ -6,7 +6,7 @@ TOKEN = os.environ.get("THREADS_ACCESS_TOKEN")
 URL = "https://graph.threads.net/v1.0/keyword_search"
 
 params = {
-    "q": "Android",
+    "q": "Instagram",
     "search_type": "RECENT",
     "fields": "id,text,username,permalink,timestamp",
     "limit": 10,
