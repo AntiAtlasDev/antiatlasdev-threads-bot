@@ -1,140 +1,114 @@
 
 import os
-import re
-import html
 import requests
+from requests.adapters import HTTPAdapter
+from urllib.parse import urlparse
 
 API_URL = "https://mastodon.social"
-TOKEN = os.environ.get("MASTODON_ACCESS_TOKEN")
+ACCESS_TOKEN = os.environ.get("MASTODON_ACCESS_TOKEN")
 
 SEARCH_TERMS = [
-    "VPN", "WireGuard", "OpenVPN",
-    "Shadowsocks", "V2Ray", "Xray",
-    "DNS problem", "DNS filtering",
-    "Android DNS", "GPS problem",
-    "mock location", "GPS spoofing",
-    "Android proxy", "SOCKS5 proxy",
-    "HTTP proxy", "firewall",
-    "VPN recommendation", "VPN alternative",
-    "VPN not working", "app connection problem"
+    "VPN recommendation",
+    "VPN not working",
+    "DNS problem",
 ]
 
 TOPICS = [
-    "vpn", "wireguard", "openvpn",
-    "shadowsocks", "v2ray", "xray",
-    "proxy", "dns", "firewall",
-    "mock location", "gps spoofing",
-    "gps simulator", "location simulator",
-    "socks5", "doh", "dot",
-    "dns over https", "dns over tls"
-]
-
-HELP_PHRASES = [
-    "need help", "please help",
-    "can someone help", "how do i",
-    "how can i", "anyone know",
-    "does anyone know", "looking for help",
-    "can anyone recommend",
-    "any recommendations", "which app",
-    "any alternative", "any solution",
-    "is there a way", "is it possible",
-    "what app", "what should i",
-    "what vpn", "which vpn",
-    "recommend a vpn", "looking for a vpn",
-    "looking for an alternative"
-]
-
-PROBLEM_PHRASES = [
-    "not working", "doesn't work",
-    "does not work", "can't connect",
-    "cannot connect", "unable to connect",
-    "connection problem", "connection issue",
-    "having trouble", "having problems",
-    "keeps crashing", "app crashes",
-    "error when", "failed to connect",
-    "stopped working", "getting an error",
-    "doesn't connect", "not connecting",
-    "connection keeps dropping",
-    "blocked by", "leaking dns",
-    "dns leak", "slow connection"
+    "vpn", "wireguard", "openvpn", "shadowsocks",
+    "v2ray", "xray", "proxy", "dns", "firewall",
+    "mock location", "gps spoofing", "gps simulator",
+    "location simulator", "socks5", "doh", "dot",
+    "dns over https", "dns over tls",
 ]
 
 PROMO_PHRASES = [
-    "sponsored", "affiliate link",
-    "promo code", "buy now",
-    "limited offer", "giveaway",
-    "discount code", "advertisement",
-    "introducing our", "meet our new",
-    "download now", "get started today",
-    "launching our", "use my referral",
-    "sign up using my link"
+    "buy now", "discount", "promo code",
+    "referral link", "sign up using",
+    "follow me", "giveaway",
 ]
 
-HARDWARE_TERMS = [
-    "gpu", "graphics card", "graphics cards",
-    "processor", "chipset", "ssd",
-    "ram prices", "motherboard",
-    "memory prices", "chip prices",
-    "graphics driver", "benchmark"
+HELP_PHRASES = [
+    "need help", "can someone help",
+    "any advice", "any suggestions",
+    "how do i", "how can i", "does anyone know",
+    "looking for", "recommend", "recommendation",
+    "alternative to", "alternatives to",
+    "what vpn", "which vpn", "any vpn",
+]
+
+PROBLEM_PHRASES = [
+    "not working", "doesn't work", "does not work",
+    "stopped working", "connection failed",
+    "cannot connect", "can't connect",
+    "blocked", "leaking", "leak",
+    "issue with", "problem with", "error",
+    "slow connection", "disconnects",
 ]
 
 RECOMMENDATION_TERMS = [
-    "recommend a vpn", "vpn recommendation",
-    "vpn service", "vpn alternative",
-    "looking for a vpn", "which vpn",
-    "what vpn", "dns provider",
-    "dns alternative", "proxy recommendation"
+    "recommend", "recommendation", "alternative",
+    "alternatives", "suggestion", "suggestions",
+    "looking for", "which vpn", "what vpn",
 ]
 
+HARDWARE_TERMS = [
+    "gpu", "cpu", "ram", "ssd", "motherboard",
+    "graphics card", "processor", "laptop",
+]
 
-def clean_text(content):
-    content = re.sub(r"<[^>]+>", " ", content)
-    content = html.unescape(content)
-    content = re.sub(r"https?://\S+", " ", content)
-    return re.sub(r"\s+", " ", content).strip().lower()
-
-
-def matches(text, phrases):
-    return [
-        phrase for phrase in phrases
-        if re.search(
-            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)",
-            text
-        )
-    ]
+session = requests.Session()
+session.headers.update({
+    "Authorization": f"Bearer {ACCESS_TOKEN}",
+    "Accept": "application/json",
+})
+session.mount(
+    "https://",
+    HTTPAdapter(max_retries=0)
+)
 
 
-def classify(content):
-    text = clean_text(content)
+def contains_any(text, phrases):
+    return any(phrase in text for phrase in phrases)
 
-    topics = matches(text, TOPICS)
 
-    if not topics:
+def classify(post):
+    content = post.get("content", "")
+    text = content.lower()
+
+    # Remove HTML tags
+    import re
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if not text:
         return "UNRELATED", 0
 
-    if matches(text, PROMO_PHRASES):
+    # Must mention at least one relevant topic
+    if not contains_any(text, TOPICS):
+        return "UNRELATED", 0
+
+    # Exclude obvious advertisements
+    if contains_any(text, PROMO_PHRASES):
         return "PROMOTIONAL", 0
 
-    if matches(text, HARDWARE_TERMS):
-        return "HARDWARE", 0
+    # Exclude unrelated hardware discussions
+    if contains_any(text, HARDWARE_TERMS):
+        return "UNRELATED", 0
 
-    recommendation_found = matches(
-        text, RECOMMENDATION_TERMS
-    )
+    has_help = contains_any(text, HELP_PHRASES)
+    has_problem = contains_any(text, PROBLEM_PHRASES)
+    has_recommendation = contains_any(text, RECOMMENDATION_TERMS)
 
-    help_found = matches(text, HELP_PHRASES)
-    problem_found = matches(text, PROBLEM_PHRASES)
+    if has_recommendation:
+        return "RECOMMENDATION", 10
 
-    if recommendation_found:
-        return "HELP_REQUEST", 10
-
-    if help_found and problem_found:
+    if has_help and has_problem:
         return "HELP_AND_PROBLEM", 9
 
-    if problem_found:
+    if has_problem:
         return "TECHNICAL_PROBLEM", 8
 
-    if help_found:
+    if has_help:
         return "HELP_REQUEST", 8
 
     if "?" in text:
@@ -143,95 +117,117 @@ def classify(content):
     return "GENERAL_DISCUSSION", 4
 
 
+def search_posts(term):
+    print(f"Searching: {term}", flush=True)
+
+    try:
+        response = session.get(
+            f"{API_URL}/api/v2/search",
+            params={
+                "q": term,
+                "type": "statuses",
+                "limit": 10,
+            },
+            timeout=(3, 5),
+        )
+
+        print(
+            f"HTTP {response.status_code}: {term}",
+            flush=True
+        )
+
+        response.raise_for_status()
+        data = response.json()
+
+        return data.get("statuses", [])
+
+    except requests.RequestException as error:
+        print(f"Search failed ({term}): {error}", flush=True)
+        return []
+
+    except ValueError:
+        print(f"Invalid JSON response ({term})", flush=True)
+        return []
+
+
 def main():
-    if not TOKEN:
-        print("ERROR: Missing access token.")
+    if not ACCESS_TOKEN:
+        print("ERROR: MASTODON_ACCESS_TOKEN is missing.")
         return
 
-    headers = {
-        "Authorization": f"Bearer {TOKEN}"
-    }
-
-    seen = set()
-    results = []
+    unique_posts = {}
 
     for term in SEARCH_TERMS:
-        try:
-            response = requests.get(
-                f"{API_URL}/api/v2/search",
-                headers=headers,
-                params={
-                    "q": term,
-                    "type": "statuses",
-                    "limit": 20
-                },
-                timeout=30
-            )
+        posts = search_posts(term)
 
-            if response.status_code != 200:
-                print("Search failed:", response.status_code)
-                continue
+        for post in posts:
+            post_id = post.get("id")
+            if post_id:
+                unique_posts[post_id] = post
 
-            for status in response.json().get("statuses", []):
-                post_id = status.get("id")
+    print("\n========== SEARCH SUMMARY ==========", flush=True)
+    print(f"Unique posts: {len(unique_posts)}", flush=True)
 
-                if not post_id or post_id in seen:
-                    continue
+    results = []
 
-                seen.add(post_id)
+    for post in unique_posts.values():
+        category, score = classify(post)
 
-                text = clean_text(
-                    status.get("content", "")
-                )
+        results.append({
+            "post": post,
+            "category": category,
+            "score": score,
+        })
 
-                category, score = classify(text)
+    categories = {}
 
-                results.append({
-                    "category": category,
-                    "score": score,
-                    "user": status.get(
-                        "account", {}
-                    ).get("acct", "Unknown"),
-                    "url": status.get("url", ""),
-                    "text": text
-                })
+    for item in results:
+        category = item["category"]
+        categories[category] = categories.get(category, 0) + 1
 
-        except requests.RequestException as error:
-            print("Network error:", error)
+    print("\n========== CATEGORIES ==========", flush=True)
 
-    counts = {}
-
-    for post in results:
-        category = post["category"]
-        counts[category] = counts.get(category, 0) + 1
-
-    print("\n===== FILTER SUMMARY =====")
-    print("Unique posts:", len(seen))
-
-    for category, count in sorted(counts.items()):
-        print(f"{category}: {count}")
+    for category, count in sorted(categories.items()):
+        print(f"{category}: {count}", flush=True)
 
     candidates = [
-        post for post in results
-        if post["score"] >= 6
+        item for item in results
+        if item["score"] >= 6
     ]
 
     candidates.sort(
-        key=lambda post: post["score"],
+        key=lambda item: item["score"],
         reverse=True
     )
 
-    print("\n===== TOP 10 CANDIDATES =====")
+    print("\n========== TOP CANDIDATES ==========", flush=True)
 
-    for index, post in enumerate(candidates[:10], 1):
-        print(f"\n{index}. {post['category']}")
-        print("Score:", post["score"])
-        print("User:", post["user"])
-        print("URL:", post["url"])
-        print("Text:", post["text"][:220])
+    if not candidates:
+        print("No suitable candidates found.", flush=True)
 
-    print("\nTest completed. No replies published.")
-    print("Total candidates:", len(candidates))
+    for index, item in enumerate(candidates[:10], 1):
+        post = item["post"]
+
+        account = post.get("account", {})
+        username = account.get("acct", "Unknown")
+
+        content = post.get("content", "")
+        import re
+        content = re.sub(r"<[^>]+>", " ", content)
+        content = re.sub(r"\s+", " ", content).strip()
+
+        url = post.get("url", "")
+
+        print(f"\n{index}. @{username}", flush=True)
+        print(
+            f"Category: {item['category']} | Score: {item['score']}",
+            flush=True
+        )
+        print(f"Text: {content[:500]}", flush=True)
+        print(f"URL: {url}", flush=True)
+
+    print("\n========== TEST FINISHED ==========", flush=True)
+    print("No replies were published.", flush=True)
 
 
 if __name__ == "__main__":
