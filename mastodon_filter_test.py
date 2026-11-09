@@ -11,6 +11,7 @@ TOKEN = os.getenv("MASTODON_ACCESS_TOKEN")
 
 MAX_REPLIES_PER_DAY = 10
 TARGET_URL = "https://fosstodon.org/@chrisn/117568462618314747"
+CHRISN_ACCOUNT = "chrisn@fosstodon.org"
 
 BLOG = "https://antiatlasdev-apps.blogspot.com/"
 
@@ -74,32 +75,16 @@ PROBLEM = re.compile(
     re.I,
 )
 
-CHRISN_REPLY = """If you're looking for a stable VPN provider, Mullvad and IVPN are worth checking out.
-
-I'm also an independent Android developer behind AntiAtlasDev. I've published several networking apps and tools that you may find useful:
-
-• Custom Tunnel
-https://antiatlasdev-apps.blogspot.com/2026/11/custom-tunnel-and-mock-location.html
-
-• Slow DNS Tunnel
-https://antiatlasdev-apps.blogspot.com/2026/11/slow-dns-tunnel.html
-
-• Proxy Client VPN
-https://antiatlasdev-apps.blogspot.com/2026/11/proxy-client-vpn.html
-
-• DNS Changer
-https://antiatlasdev-apps.blogspot.com/2026/11/dns-changer.html
-
-• OpenVPN Client
-https://antiatlasdev-apps.blogspot.com/2026/11/openvpn-client.html
-
-• WireGuard VPN
-https://antiatlasdev-apps.blogspot.com/2026/11/wireguard-vpn.html
-
-Explore all my apps:
-https://antiatlasdev-apps.blogspot.com/
-
-These are Android networking tools and VPN clients, not VPN server subscriptions. Hope you find something useful!"""
+# Short enough for Mastodon's 500-character limit.
+CHRISN_REPLY = (
+    "Thanks for sharing. If you're comparing VPN providers, "
+    "Mullvad and IVPN are worth considering. I'm an independent "
+    "Android developer at AntiAtlasDev. I build Android VPN "
+    "clients and networking tools, including WireGuard, OpenVPN, "
+    "DNS and proxy tools. These are apps, not VPN server "
+    "subscriptions. Explore them here:\n"
+    + BLOG
+)
 
 
 def headers():
@@ -111,6 +96,27 @@ def clean_text(value):
     value = re.sub(r"<[^>]+>", " ", value)
     value = re.sub(r"https?://\S+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def is_chrisn_post(post):
+    if post.get("url") == TARGET_URL:
+        return True
+
+    account = post.get("account", {}).get("acct", "").lower()
+    text = clean_text(post.get("content", "")).lower()
+
+    same_account = (
+        account == CHRISN_ACCOUNT
+        or account == "chrisn"
+        or account.startswith("chrisn@fosstodon.org")
+    )
+
+    related_post = (
+        "proton" in text
+        and ("recommend" in text or "suggest" in text)
+    )
+
+    return same_account and related_post
 
 
 def classify(text):
@@ -164,7 +170,6 @@ def parse_date(value):
 
 
 def get_recent_activity(account_id):
-    """Read recent replies to enforce the daily limit and avoid duplicates."""
     since = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -180,6 +185,7 @@ def get_recent_activity(account_id):
             "limit": 40,
             "exclude_reblogs": "true",
         }
+
         if max_id:
             params["max_id"] = max_id
 
@@ -192,6 +198,7 @@ def get_recent_activity(account_id):
         response.raise_for_status()
 
         statuses = response.json()
+
         if not statuses:
             break
 
@@ -211,9 +218,15 @@ def get_recent_activity(account_id):
 
                 if created >= since:
                     daily_count += 1
-                    author_id = status.get("account", {}).get("id")
+
+                    author_id = status.get(
+                        "account", {}
+                    ).get("id")
+
                     if author_id:
-                        replied_accounts_today.add(str(author_id))
+                        replied_accounts_today.add(
+                            str(author_id)
+                        )
 
         max_id = statuses[-1]["id"]
 
@@ -224,26 +237,25 @@ def get_recent_activity(account_id):
 
 
 def build_reply(post, category):
-    post_url = post.get("url", "")
-
-    if post_url == TARGET_URL:
+    if is_chrisn_post(post):
         return CHRISN_REPLY
 
     if category == "HELP_REQUEST":
         return (
-            "If you're looking for Android networking tools rather "
-            "than a VPN subscription, I'm an independent developer "
-            "behind AntiAtlasDev. My apps include VPN clients and "
-            "DNS tools. You can explore them here:\n"
+            "If you're looking for Android networking tools "
+            "rather than a VPN subscription, I'm an independent "
+            "developer behind AntiAtlasDev. My apps include VPN "
+            "clients and DNS tools. You can explore them here:\n"
             + BLOG
         )
 
     if category == "TECHNICAL_PROBLEM":
         return (
             "For Android network troubleshooting, I develop "
-            "networking tools including DNS Changer and VPN clients. "
-            "They may help with testing, although they cannot fix "
-            "problems caused by a VPN provider or network itself:\n"
+            "networking tools including DNS Changer and VPN "
+            "clients. They may help with testing, although they "
+            "cannot fix problems caused by a VPN provider or "
+            "network itself:\n"
             + BLOG
         )
 
@@ -251,6 +263,13 @@ def build_reply(post, category):
 
 
 def publish_reply(post, message):
+    if len(message) > 500:
+        print(
+            f"Skipped: reply is too long ({len(message)} characters).",
+            flush=True,
+        )
+        return None
+
     response = requests.post(
         f"{API}/api/v1/statuses",
         headers=headers(),
@@ -275,12 +294,17 @@ def publish_reply(post, message):
 
 def main():
     if not TOKEN:
-        raise RuntimeError("MASTODON_ACCESS_TOKEN is missing.")
+        raise RuntimeError(
+            "MASTODON_ACCESS_TOKEN is missing."
+        )
 
     account = get_account()
     my_id = str(account["id"])
 
-    print(f"Authenticated: @{account['acct']}", flush=True)
+    print(
+        f"Authenticated: @{account['acct']}",
+        flush=True,
+    )
 
     daily_count, replied_ids, replied_accounts = (
         get_recent_activity(my_id)
@@ -302,8 +326,12 @@ def main():
             for post in search_posts(query):
                 if post.get("id"):
                     seen[str(post["id"])] = post
+
         except requests.RequestException as error:
-            print(f"Search error ({query}): {error}", flush=True)
+            print(
+                f"Search error ({query}): {error}",
+                flush=True,
+            )
 
     candidates = []
 
@@ -317,45 +345,49 @@ def main():
         if post.get("in_reply_to_id"):
             continue
 
-        if post.get("visibility") not in ("public", "unlisted"):
+        if post.get("visibility") not in (
+            "public",
+            "unlisted",
+        ):
             continue
 
         content = clean_text(post.get("content", ""))
         category = classify(content)
 
-        # The explicitly approved Chrisn post is handled separately.
-        is_chrisn = post.get("url") == TARGET_URL
+        target = is_chrisn_post(post)
 
-        if not is_chrisn and category not in (
+        if not target and category not in (
             "HELP_REQUEST",
             "TECHNICAL_PROBLEM",
         ):
             continue
 
-        candidates.append((post, category))
+        candidates.append((post, category, target))
 
-    # Give the previously approved post priority.
+    # Give Chrisn priority.
     candidates.sort(
-        key=lambda item: item[0].get("url") != TARGET_URL
+        key=lambda item: not item[2]
     )
 
     published = 0
 
-    for post, category in candidates:
+    for post, category, target in candidates:
         if daily_count + published >= MAX_REPLIES_PER_DAY:
             break
 
         post_id = str(post["id"])
-        author_id = str(post.get("account", {}).get("id", ""))
+        author_id = str(
+            post.get("account", {}).get("id", "")
+        )
 
         if post_id in replied_ids:
             continue
 
-        # Avoid replying repeatedly to the same account in one day.
         if author_id in replied_accounts:
             continue
 
         message = build_reply(post, category)
+
         if not message:
             continue
 
@@ -380,7 +412,8 @@ def main():
 
     print(
         f"Finished. New replies: {published}. "
-        f"Daily total: {daily_count + published}/{MAX_REPLIES_PER_DAY}",
+        f"Daily total: {daily_count + published}/"
+        f"{MAX_REPLIES_PER_DAY}",
         flush=True,
     )
 
