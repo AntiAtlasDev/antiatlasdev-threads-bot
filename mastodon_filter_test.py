@@ -18,14 +18,26 @@ SEARCH_TERMS = [
     "Android proxy"
 ]
 
-RELEVANT_KEYWORDS = [
-    "vpn", "wireguard", "openvpn", "shadowsocks",
-    "v2ray", "xray", "proxy", "dns",
-    "firewall", "mock location", "gps spoofing",
-    "location simulator", "gps simulator",
-    "android app development", "android application",
-    "app recommendation", "mobile app development",
-    "mobile application", "android apps"
+TOPIC_KEYWORDS = [
+    "android", "vpn", "wireguard", "openvpn",
+    "shadowsocks", "v2ray", "xray", "proxy",
+    "dns", "firewall", "mock location",
+    "gps spoofing", "gps simulator",
+    "location simulator", "mobile app",
+    "android app", "smartphone"
+]
+
+INTENT_KEYWORDS = [
+    "how do i", "how can i", "how to",
+    "anyone know", "does anyone", "can anyone",
+    "looking for", "need help", "help me",
+    "recommend", "recommendation",
+    "suggestion", "what is the best",
+    "which app", "any alternative",
+    "having trouble", "not working",
+    "problem with", "issue with",
+    "is there a way", "any solution",
+    "does anyone recommend"
 ]
 
 PROMO_KEYWORDS = [
@@ -41,14 +53,22 @@ def clean_text(content):
     return re.sub(r"\s+", " ", content).strip()
 
 
-def is_relevant(text):
+def is_candidate(text):
     text = text.lower()
 
     if any(word in text for word in PROMO_KEYWORDS):
         return False
 
-    # Android alone is not enough.
-    return any(word in text for word in RELEVANT_KEYWORDS)
+    has_topic = any(
+        word in text for word in TOPIC_KEYWORDS
+    )
+
+    has_intent = (
+        "?" in text or
+        any(word in text for word in INTENT_KEYWORDS)
+    )
+
+    return has_topic and has_intent
 
 
 def main():
@@ -84,9 +104,7 @@ def main():
                 print("Search failed:", response.text[:300])
                 continue
 
-            statuses = response.json().get("statuses", [])
-
-            for status in statuses:
+            for status in response.json().get("statuses", []):
                 post_id = status.get("id")
 
                 if not post_id or post_id in seen_ids:
@@ -98,7 +116,7 @@ def main():
                     status.get("content", "")
                 )
 
-                if not is_relevant(content):
+                if not is_candidate(content):
                     continue
 
                 account = status.get("account", {})
@@ -115,7 +133,7 @@ def main():
 
     print("\n========== FILTER RESULTS ==========")
     print("Unique posts checked:", len(seen_ids))
-    print("Relevant candidates:", len(candidates))
+    print("Potential conversations:", len(candidates))
 
     for index, post in enumerate(candidates, 1):
         print(f"\nCandidate {index}")
@@ -123,7 +141,7 @@ def main():
         print("URL:", post["url"])
         print("Text:", post["text"][:350])
 
-    print("\nFilter test completed. No posts were published.")
+    print("\nTest completed. No replies were published.")
 
 
 if __name__ == "__main__":
