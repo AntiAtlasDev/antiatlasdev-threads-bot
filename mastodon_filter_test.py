@@ -9,16 +9,23 @@ TOKEN = os.environ.get("MASTODON_ACCESS_TOKEN")
 
 SEARCH_TERMS = [
     "Android VPN",
-    "Android apps",
-    "GPS Android",
-    "DNS Android"
+    "WireGuard",
+    "OpenVPN",
+    "Android DNS",
+    "Android GPS",
+    "Android firewall",
+    "mock location",
+    "Android proxy"
 ]
 
 RELEVANT_KEYWORDS = [
-    "android", "vpn", "wireguard", "openvpn",
-    "shadowsocks", "v2ray", "gps", "mock location",
-    "dns", "mobile app", "smartphone",
-    "android app", "proxy"
+    "vpn", "wireguard", "openvpn", "shadowsocks",
+    "v2ray", "xray", "proxy", "dns",
+    "firewall", "mock location", "gps spoofing",
+    "location simulator", "gps simulator",
+    "android app development", "android application",
+    "app recommendation", "mobile app development",
+    "mobile application", "android apps"
 ]
 
 PROMO_KEYWORDS = [
@@ -40,6 +47,7 @@ def is_relevant(text):
     if any(word in text for word in PROMO_KEYWORDS):
         return False
 
+    # Android alone is not enough.
     return any(word in text for word in RELEVANT_KEYWORDS)
 
 
@@ -86,9 +94,11 @@ def main():
 
                 seen_ids.add(post_id)
 
-                text = clean_text(status.get("content", ""))
+                content = clean_text(
+                    status.get("content", "")
+                )
 
-                if not is_relevant(text):
+                if not is_relevant(content):
                     continue
 
                 account = status.get("account", {})
@@ -97,7 +107,7 @@ def main():
                     "id": post_id,
                     "user": account.get("acct", "Unknown"),
                     "url": status.get("url", ""),
-                    "text": text
+                    "text": content
                 })
 
         except requests.RequestException as error:
@@ -113,7 +123,7 @@ def main():
         print("URL:", post["url"])
         print("Text:", post["text"][:350])
 
-    print("\nTest completed. No posts were published.")
+    print("\nFilter test completed. No posts were published.")
 
 
 if __name__ == "__main__":
