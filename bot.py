@@ -4,34 +4,31 @@ import subprocess
 import requests
 import xml.etree.ElementTree as ET
 import time
+import random
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "used_articles.json"
 
 ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN")
+USER_ID = os.environ.get("THREADS_USER_ID")
+
+# إعدادات البحث
+SEARCH_QUERIES = ["VPN recommendation", "DNS not working", "Android network tools"]
+MAX_REPLIES_PER_RUN = 1 # الرد على منشور واحد فقط في كل تشغيل (حماية)
 
 def get_articles():
     try:
-        response = requests.get(
-            RSS_URL,
-            headers={"User-Agent": "AntiAtlasDevThreadsBot/1.0"},
-            timeout=30
-        )
+        response = requests.get(RSS_URL, headers={"User-Agent": "AntiAtlasDevBot/1.0"}, timeout=30)
         response.raise_for_status()
-
         root = ET.fromstring(response.content)
-        items = root.findall("./channel/item")
-
         articles = []
-        for item in items:
+        for item in root.findall("./channel/item"):
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
             if title and link:
                 articles.append({"title": title, "link": link})
-
         print("Total articles:", len(articles))
         return articles
-
     except Exception as error:
         print("RSS error:", error)
         return []
@@ -43,7 +40,6 @@ def load_history():
         with open(HISTORY_FILE, "r", encoding="utf-8") as file:
             return json.load(file)
     except (json.JSONDecodeError, OSError):
-        print("History file could not be read.")
         return []
 
 def save_history(history):
@@ -62,61 +58,118 @@ def select_article(articles, history):
     history.append(article["link"])
     return article
 
-def prepare_post(article):
-    return (
-        f"Discover {article['title']} from AntiAtlasDev!\n\n"
-        f"Read more:\n{article['link']}"
-    )
+def search_and_reply():
+    print("--- Processing Replies ---")
+    if not USER_ID:
+        print("THREADS_USER_ID is missing. Cannot search.")
+        return 0
 
-def publish_to_threads(text):
-    if not ACCESS_TOKEN:
-        raise RuntimeError("THREADS_ACCESS_TOKEN is missing.")
+    replies_made = 0
+    for query in SEARCH_QUERIES:
+        if replies_made >= MAX_REPLIES_PER_RUN:
+            break
+            
+        print(f"Searching for: {query}")
+        search_url = "https://graph.threads.net/v1.0/keyword_search"
+        params = {
+            "q": query,
+            "search_type": "RECENT",
+            "access_token": ACCESS_TOKEN
+        }
+        
+        try:
+            response = requests.get(search_url, params=params, timeout=15)
+            if response.status_code != 200:
+                print(f"Search error ({response.status_code}): {response.text}")
+                continue
+                
+            data = response.json().get("data", [])
+            if not data:
+                print("No results found.")
+                continue
 
-    print("Creating Threads container...")
-    url_create = "https://graph.threads.net/v1.0/me/threads"
+            for post in data:
+                # تجنب الرد على منشوراتنا
+                if post.get("username") == "antiatlasdev": 
+                    continue
+                
+                post_id = post.get("id")
+                if not post_id:
+                    continue
+
+                replies = [
+                    "If you're looking for Android network tools, I develop independent apps for VPNs, DNS, and diagnostics. Check them out here: https://antiatlasdev-apps.blogspot.com/",
+                    "As an Android dev, I build utilities for networking and security. You might find something useful here: https://antiatlasdev-apps.blogspot.com/"
+                ]
+                reply_text = random.choice(replies)
+
+                create_url = f"https://graph.threads.net/v1.0/{USER_ID}/threads"
+                payload = {
+                    "media_type": "TEXT",
+                    "text": reply_text,
+                    "reply_to_id": post_id,
+                    "access_token": ACCESS_TOKEN
+                }
+                
+                res = requests.post(create_url, data=payload, timeout=15)
+                if res.status_code != 200:
+                    print(f"Error creating reply container: {res.text}")
+                    continue
+                    
+                creation_id = res.json().get("id")
+                print(f"Reply container created: {creation_id}")
+                
+                # الانتظار 30 ثانية قبل النشر
+                time.sleep(30)
+                
+                publish_url = f"https://graph.threads.net/v1.0/{USER_ID}/threads_publish"
+                pub_payload = {
+                    "creation_id": creation_id,
+                    "access_token": ACCESS_TOKEN
+                }
+                
+                pub_res = requests.post(publish_url, data=pub_payload, timeout=15)
+                if pub_res.status_code == 200:
+                    print(f"✅ Replied to @{post.get('username')} successfully!")
+                    replies_made += 1
+                    break # نكتفي برد واحد لكل استعلام
+                else:
+                    print(f"Error publishing reply: {pub_res.text}")
+                    
+        except Exception as e:
+            print(f"Exception during search/reply: {e}")
+
+    return replies_made
+
+def publish_post(text):
+    print("--- Publishing New Article ---")
+    url_create = f"https://graph.threads.net/v1.0/{USER_ID}/threads"
     payload_create = {
         "media_type": "TEXT",
         "text": text,
         "access_token": ACCESS_TOKEN
     }
-    
     try:
-        # إضافة timeout هنا
         response = requests.post(url_create, data=payload_create, timeout=15)
-    except requests.exceptions.RequestException as e:
-        print(f"Network error during container creation: {e}")
-        return False
-
-    if response.status_code != 200:
-        print(f"Error creating container: {response.text}")
-        return False
-    
-    creation_id = response.json().get("id")
-    print(f"Container created: {creation_id}")
-
-    print("Waiting 30 seconds for container to process...")
-    time.sleep(30)
-
-    print("Publishing to Threads...")
-    url_publish = "https://graph.threads.net/v1.0/me/threads_publish"
-    payload_publish = {
-        "creation_id": creation_id,
-        "access_token": ACCESS_TOKEN
-    }
-    
-    try:
-        # إضافة timeout هنا أيضاً
+        if response.status_code != 200:
+            print(f"Error creating container: {response.text}")
+            return False
+        creation_id = response.json().get("id")
+        print(f"Container created: {creation_id}")
+        print("Waiting 30 seconds...")
+        time.sleep(30)
+        
+        url_publish = f"https://graph.threads.net/v1.0/{USER_ID}/threads_publish"
+        payload_publish = {"creation_id": creation_id, "access_token": ACCESS_TOKEN}
         response = requests.post(url_publish, data=payload_publish, timeout=15)
-    except requests.exceptions.RequestException as e:
-        print(f"Network error during publishing: {e}")
-        return False
-
-    if response.status_code == 200:
-        print("✅ Published successfully on Threads!")
-        print("Post ID:", response.json().get("id"))
-        return True
-    else:
-        print(f"Error publishing: {response.text}")
+        if response.status_code == 200:
+            print("✅ Published successfully!")
+            return True
+        else:
+            print(f"Error publishing: {response.text}")
+            return False
+    except Exception as e:
+        print(f"Exception during publish: {e}")
         return False
 
 def commit_history():
@@ -124,47 +177,30 @@ def commit_history():
         subprocess.run(["git", "config", "user.name", "AntiAtlasDev Bot"], check=True)
         subprocess.run(["git", "config", "user.email", "bot@antiatlasdev.com"], check=True)
         subprocess.run(["git", "add", HISTORY_FILE], check=True)
-
         result = subprocess.run(["git", "diff", "--cached", "--quiet"])
-
         if result.returncode == 1:
-            subprocess.run(["git", "commit", "-m", "Update used articles history"], check=True)
+            subprocess.run(["git", "commit", "-m", "Update history"], check=True)
             subprocess.run(["git", "push"], check=True)
-            print("Article history saved to GitHub.")
-        elif result.returncode == 0:
-            print("No history changes to save.")
-        else:
-            raise RuntimeError("Git diff failed.")
+            print("History saved.")
     except Exception as error:
         print("Git history save error:", error)
-        raise
 
 if __name__ == "__main__":
-    print("AntiAtlasDev Threads Bot")
-    print("Mode: LIVE PUBLISHING")
-
+    print("AntiAtlasDev Threads Bot - Search, Reply & Publish")
+    
+    # 1. محاولة الردود أولاً
+    replies = search_and_reply()
+    
+    # 2. نشر مقال جديد
     articles = get_articles()
-    if not articles:
-        print("No articles available. Stopping.")
-        raise SystemExit(1)
-
-    history = load_history()
-    print("Previously used articles:", len(history))
-
-    article = select_article(articles, history)
-
-    if article:
-        draft = prepare_post(article)
-        print("\nSelected article:", article["title"])
-        print("\nPrepared Threads post:\n------------------------------")
-        print(draft)
-        print("------------------------------")
-
-        success = publish_to_threads(draft)
-
-        if success:
-            save_history(history)
-            commit_history()
-            print("\nFinished successfully.")
-        else:
-            print("\nPublishing failed. History not saved.")
+    if articles:
+        history = load_history()
+        article = select_article(articles, history)
+        if article:
+            draft = f"Discover {article['title']} from AntiAtlasDev!\n\nRead more:\n{article['link']}"
+            success = publish_post(draft)
+            if success:
+                save_history(history)
+                commit_history()
+    
+    print("\nBot finished.")
