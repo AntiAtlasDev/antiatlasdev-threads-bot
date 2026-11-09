@@ -1,7 +1,7 @@
-
 import os
 import json
 import subprocess
+import random
 from datetime import datetime, timezone
 from html import unescape
 from html.parser import HTMLParser
@@ -14,6 +14,8 @@ API_URL = "https://dev.to/api/articles"
 
 HISTORY_FILE = "devto_used_articles.json"
 STATE_FILE = "devto_daily_state.json"
+
+# نشر مقال واحد يومياً هو الخيار الأفضل والأكثر أماناً في Dev.to
 DAILY_LIMIT = 1
 
 
@@ -83,11 +85,23 @@ def publish(article):
         "Discover this Android app and development article from AntiAtlasDev."
     )
 
+    # إضافة مقدمة تقنية قصيرة لتجنب اعتبار المقال "محتوى غير مكتمل"
+    intros = [
+        "In this article, we explore a practical Android development topic. ",
+        "Android development is constantly evolving. Here is a quick look at a useful tool. ",
+        "If you're interested in Android utilities and networking, this is for you. "
+    ]
+    intro_text = random.choice(intros)
+
     body = (
+        f"{intro_text}\n\n"
         f"{description}\n\n"
-        f"**Read the full original article:**\n"
-        f"{article['link']}\n\n"
-        "Follow AntiAtlasDev for more Android development updates."
+        f"### Read the full original article:\n"
+        f"[{article['title']}]({article['link']})\n\n"
+        "---\n"
+        "**About the Author:** I'm an independent Android developer at AntiAtlasDev, "
+        "building networking tools, VPN clients, and utilities. "
+        "Follow me for more Android development updates!"
     )
 
     payload = {
@@ -97,7 +111,8 @@ def publish(article):
             "published": True,
             "canonical_url": article["link"],
             "description": description[:160],
-            "tags": ["android", "mobile", "programming"]
+            # تحسين الوسوم
+            "tags": ["android", "mobile", "programming", "opensource", "appdev"]
         }
     }
 
@@ -150,6 +165,7 @@ if __name__ == "__main__":
 
     today = datetime.now(timezone.utc).date().isoformat()
 
+    # استخدام .get() لتجنب أخطاء الملفات القديمة
     state = load_json(STATE_FILE, {
         "date": today,
         "count": 0
@@ -157,10 +173,13 @@ if __name__ == "__main__":
 
     if state.get("date") != today:
         state = {"date": today, "count": 0}
+    elif "count" not in state:
+        state["count"] = 0
 
-    print("Today's publications:", state["count"], "/", DAILY_LIMIT)
+    current_count = state.get("count", 0)
+    print("Today's publications:", current_count, "/", DAILY_LIMIT)
 
-    if state["count"] >= DAILY_LIMIT:
+    if current_count >= DAILY_LIMIT:
         print("Daily limit reached.")
         raise SystemExit(0)
 
@@ -181,10 +200,10 @@ if __name__ == "__main__":
     publish(article)
 
     history.append(article["link"])
-    state["count"] += 1
+    state["count"] = current_count + 1
 
     save_json(HISTORY_FILE, history)
     save_json(STATE_FILE, state)
     commit_history()
 
-    print("Daily publications:", state["count"], "/", DAILY_LIMIT)
+    print("Daily publications:", state.get("count", 0), "/", DAILY_LIMIT)
