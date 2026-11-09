@@ -8,19 +8,16 @@ API_URL = "https://mastodon.social"
 TOKEN = os.environ.get("MASTODON_ACCESS_TOKEN")
 
 SEARCH_TERMS = [
-    "Android VPN problem",
-    "Android VPN recommendation",
-    "Android WireGuard",
-    "Android OpenVPN",
-    "Android DNS problem",
-    "Android GPS problem",
-    "Android proxy",
-    "Android firewall",
-    "Android app not working",
-    "Android mock location",
-    "Android VPN alternative",
-    "smartphone VPN problem",
-    "Android connection issue"
+    "VPN", "WireGuard", "OpenVPN",
+    "Shadowsocks", "V2Ray", "Xray",
+    "DNS problem", "DNS filtering",
+    "Android DNS", "GPS problem",
+    "mock location", "GPS spoofing",
+    "Android proxy", "SOCKS5 proxy",
+    "HTTP proxy", "firewall",
+    "VPN recommendation",
+    "VPN alternative", "VPN not working",
+    "app connection problem"
 ]
 
 TOPICS = [
@@ -28,16 +25,9 @@ TOPICS = [
     "shadowsocks", "v2ray", "xray",
     "proxy", "dns", "firewall",
     "mock location", "gps spoofing",
-    "gps simulator", "location simulator"
-]
-
-ANDROID_CONTEXT = [
-    "android", "android phone", "android app",
-    "android device", "android tablet",
-    "smartphone", "mobile phone",
-    "samsung galaxy", "google pixel",
-    "oneplus", "xiaomi phone",
-    "redmi phone", "mobile device"
+    "gps simulator", "location simulator",
+    "socks5", "doh", "dot",
+    "dns over https", "dns over tls"
 ]
 
 HELP_PHRASES = [
@@ -50,7 +40,9 @@ HELP_PHRASES = [
     "any alternative", "any solution",
     "is there a way", "is it possible",
     "what app", "what should i",
-    "what vpn", "which vpn"
+    "what vpn", "which vpn",
+    "recommend a vpn", "looking for a vpn",
+    "looking for an alternative"
 ]
 
 PROBLEM_PHRASES = [
@@ -63,7 +55,9 @@ PROBLEM_PHRASES = [
     "error when", "failed to connect",
     "stopped working", "getting an error",
     "doesn't connect", "not connecting",
-    "connection keeps dropping"
+    "connection keeps dropping",
+    "blocked by", "leaking dns",
+    "dns leak", "slow connection"
 ]
 
 PROMO_PHRASES = [
@@ -75,13 +69,6 @@ PROMO_PHRASES = [
     "download now", "get started today",
     "launching our", "use my referral",
     "sign up using my link"
-]
-
-HARDWARE_TERMS = [
-    "gpu", "graphics card", "ssd",
-    "ram prices", "processor",
-    "motherboard", "chipset",
-    "graphics driver", "benchmark"
 ]
 
 
@@ -115,30 +102,22 @@ def classify(content):
     if matches(text, PROMO_PHRASES):
         return "PROMOTIONAL", 0
 
-    android_found = matches(text, ANDROID_CONTEXT)
-
-    if not android_found:
-        return "NON_ANDROID", 0
-
-    if matches(text, HARDWARE_TERMS):
-        return "HARDWARE", 0
-
     help_found = matches(text, HELP_PHRASES)
     problem_found = matches(text, PROBLEM_PHRASES)
 
     if help_found and problem_found:
         return "HELP_AND_PROBLEM", 9
 
-    if help_found:
-        return "HELP_REQUEST", 7
-
     if problem_found:
-        return "TECHNICAL_PROBLEM", 7
+        return "TECHNICAL_PROBLEM", 8
+
+    if help_found:
+        return "HELP_REQUEST", 8
 
     if "?" in text:
-        return "GENERAL_QUESTION", 4
+        return "GENERAL_QUESTION", 6
 
-    return "GENERAL_DISCUSSION", 1
+    return "GENERAL_DISCUSSION", 4
 
 
 def main():
@@ -203,7 +182,7 @@ def main():
         category = post["category"]
         counts[category] = counts.get(category, 0) + 1
 
-    print("\n===== ANDROID FILTER SUMMARY =====")
+    print("\n===== FILTER SUMMARY =====")
     print("Unique posts:", len(seen))
 
     for category, count in sorted(counts.items()):
@@ -211,7 +190,7 @@ def main():
 
     candidates = [
         post for post in results
-        if post["score"] >= 7
+        if post["score"] >= 6
     ]
 
     candidates.sort(
@@ -219,10 +198,11 @@ def main():
         reverse=True
     )
 
-    print("\n===== TOP 5 ANDROID CANDIDATES =====")
+    print("\n===== TOP 10 CANDIDATES =====")
 
-    for index, post in enumerate(candidates[:5], 1):
+    for index, post in enumerate(candidates[:10], 1):
         print(f"\n{index}. {post['category']}")
+        print("Score:", post["score"])
         print("User:", post["user"])
         print("URL:", post["url"])
         print("Text:", post["text"][:220])
@@ -233,3 +213,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
