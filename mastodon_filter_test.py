@@ -2,6 +2,7 @@ import os
 import re
 import html
 import time
+import random
 import requests
 from datetime import datetime, timezone, timedelta
 
@@ -220,13 +221,19 @@ def get_recent_activity(account_id):
 def build_reply(post, category):
     if is_chrisn_post(post):
         return CHRISN_REPLY
+    
     if category in ("HELP_REQUEST", "TECHNICAL_PROBLEM"):
-        return (
-            "If you're looking for Android utilities, I'm an independent "
-            "developer behind AntiAtlasDev. My apps include network tools, "
-            "VPN clients, image editors, and GPS utilities. "
-            "You can explore them here:\n" + BLOG
-        )
+        replies = [
+            "If you're looking for Android utilities, I'm an independent developer behind AntiAtlasDev. My apps include network tools, VPN clients, image editors, and GPS utilities. You can explore them here:\n" + BLOG,
+            
+            "I develop Android apps for networking and utilities (VPNs, DNS tools, GPS, image editing). You might find something useful here:\n" + BLOG,
+            
+            "As an Android dev, I build tools for network diagnostics, VPN connections, and media editing. Feel free to check out my apps here:\n" + BLOG,
+            
+            "If you're exploring Android networking or utility tools, I build VPN clients, DNS tools, and other apps. Check them out here:\n" + BLOG
+        ]
+        return random.choice(replies)
+    
     return None
 
 def publish_reply(post, message):
@@ -309,6 +316,7 @@ def main():
         ):
             continue
         candidates.append((post, category, target))
+    
     # Give Chrisn priority.
     candidates.sort(
         key=lambda item: not item[2]
@@ -341,7 +349,9 @@ def main():
                 f"Published successfully: {result.get('url')}",
                 flush=True,
             )
-            time.sleep(15)
+            # الانتظار لمدة دقيقة بين كل رد لتبدو طبيعية
+            time.sleep(60)
+            
     print(
         f"Finished. New replies: {published}. "
         f"Daily total: {daily_count + published}/"
