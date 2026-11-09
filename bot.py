@@ -8,7 +8,6 @@ import time
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "used_articles.json"
 
-# سيتم جلب التوكن من إعدادات GitHub
 ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN")
 
 def get_articles():
@@ -24,16 +23,11 @@ def get_articles():
         items = root.findall("./channel/item")
 
         articles = []
-
         for item in items:
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
-
             if title and link:
-                articles.append({
-                    "title": title,
-                    "link": link
-                })
+                articles.append({"title": title, "link": link})
 
         print("Total articles:", len(articles))
         return articles
@@ -45,7 +39,6 @@ def get_articles():
 def load_history():
     if not os.path.exists(HISTORY_FILE):
         return []
-
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as file:
             return json.load(file)
@@ -58,19 +51,13 @@ def save_history(history):
         json.dump(history, file, ensure_ascii=False, indent=2)
 
 def select_article(articles, history):
-    unused = [
-        article for article in articles
-        if article["link"] not in history
-    ]
-
+    unused = [article for article in articles if article["link"] not in history]
     if not unused:
         print("All articles have been used. Starting a new cycle.")
         history.clear()
         unused = articles
-
     if not unused:
         return None
-
     article = unused[0]
     history.append(article["link"])
     return article
@@ -85,7 +72,6 @@ def publish_to_threads(text):
     if not ACCESS_TOKEN:
         raise RuntimeError("THREADS_ACCESS_TOKEN is missing.")
 
-    # 1. إنشاء الحاوية (Container)
     print("Creating Threads container...")
     url_create = "https://graph.threads.net/v1.0/me/threads"
     payload_create = {
@@ -94,7 +80,13 @@ def publish_to_threads(text):
         "access_token": ACCESS_TOKEN
     }
     
-    response = requests.post(url_create, data=payload_create)
+    try:
+        # إضافة timeout هنا
+        response = requests.post(url_create, data=payload_create, timeout=15)
+    except requests.exceptions.RequestException as e:
+        print(f"Network error during container creation: {e}")
+        return False
+
     if response.status_code != 200:
         print(f"Error creating container: {response.text}")
         return False
@@ -102,11 +94,9 @@ def publish_to_threads(text):
     creation_id = response.json().get("id")
     print(f"Container created: {creation_id}")
 
-    # Threads يتطلب الانتظار 30 ثانية قبل النشر
     print("Waiting 30 seconds for container to process...")
     time.sleep(30)
 
-    # 2. النشر (Publish)
     print("Publishing to Threads...")
     url_publish = "https://graph.threads.net/v1.0/me/threads_publish"
     payload_publish = {
@@ -114,7 +104,13 @@ def publish_to_threads(text):
         "access_token": ACCESS_TOKEN
     }
     
-    response = requests.post(url_publish, data=payload_publish)
+    try:
+        # إضافة timeout هنا أيضاً
+        response = requests.post(url_publish, data=payload_publish, timeout=15)
+    except requests.exceptions.RequestException as e:
+        print(f"Network error during publishing: {e}")
+        return False
+
     if response.status_code == 200:
         print("✅ Published successfully on Threads!")
         print("Post ID:", response.json().get("id"))
@@ -148,7 +144,6 @@ if __name__ == "__main__":
     print("Mode: LIVE PUBLISHING")
 
     articles = get_articles()
-
     if not articles:
         print("No articles available. Stopping.")
         raise SystemExit(1)
@@ -160,16 +155,11 @@ if __name__ == "__main__":
 
     if article:
         draft = prepare_post(article)
-
-        print("\nSelected article:")
-        print(article["title"])
-
-        print("\nPrepared Threads post:")
-        print("------------------------------")
+        print("\nSelected article:", article["title"])
+        print("\nPrepared Threads post:\n------------------------------")
         print(draft)
         print("------------------------------")
 
-        # النشر الفعلي
         success = publish_to_threads(draft)
 
         if success:
