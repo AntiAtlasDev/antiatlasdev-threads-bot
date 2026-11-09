@@ -19,38 +19,36 @@ SEARCH_TERMS = [
 ]
 
 TOPICS = [
-    "android", "vpn", "wireguard", "openvpn",
+    "android vpn", "vpn", "wireguard", "openvpn",
     "shadowsocks", "v2ray", "xray", "proxy",
     "dns", "firewall", "mock location",
     "gps spoofing", "gps simulator",
     "location simulator", "android app",
-    "mobile app"
+    "android apps", "mobile app", "mobile apps"
 ]
 
-HELP_REQUESTS = [
-    "how do i", "how can i", "how to",
-    "can someone help", "could someone help",
-    "need help", "please help",
-    "anyone know how", "does anyone know",
-    "looking for an app", "looking for a vpn",
-    "looking for an alternative",
-    "can anyone recommend", "any recommendations",
-    "which app should i", "what app can i",
-    "not working", "doesn't work",
-    "does not work", "having trouble",
-    "having problems", "cannot connect",
-    "can't connect", "connection problem",
-    "is there a way to"
+HELP_PHRASES = [
+    "need help", "please help", "can someone help",
+    "could someone help", "how do i", "how can i",
+    "how to", "anyone know", "does anyone know",
+    "looking for", "can anyone recommend",
+    "any recommendations", "what is the best",
+    "which app", "any alternative", "any solution",
+    "not working", "doesn't work", "does not work",
+    "having trouble", "having problems",
+    "cannot connect", "can't connect",
+    "connection problem", "problem with",
+    "issue with", "is there a way"
 ]
 
 PROMO_PHRASES = [
     "sponsored", "affiliate link", "promo code",
     "buy now", "limited offer", "giveaway",
     "discount code", "advertisement",
-    "meet our new", "introducing",
-    "check out our", "download now",
-    "available now", "new release",
-    "launching today", "get started today"
+    "introducing our", "meet our new",
+    "download now", "available now",
+    "check out our", "get started today",
+    "features include", "lets you:"
 ]
 
 
@@ -61,27 +59,46 @@ def clean_text(content):
     return re.sub(r"\s+", " ", content).strip().lower()
 
 
-def contains_topic(text):
-    return any(
-        re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text)
-        for word in TOPICS
-    )
-
-
-def is_candidate(text):
-    text = clean_text(text)
+def score_post(content):
+    text = clean_text(content)
 
     if any(phrase in text for phrase in PROMO_PHRASES):
-        return False
+        return 0, ["Promotional content"]
 
-    if not contains_topic(text):
-        return False
+    matched_topics = [
+        word for word in TOPICS if word in text
+    ]
 
-    # A clear help request is required.
-    if not any(phrase in text for phrase in HELP_REQUESTS):
-        return False
+    if not matched_topics:
+        return 0, ["No relevant technical topic"]
 
-    return True
+    score = 2
+    reasons = ["Relevant topic: " + ", ".join(matched_topics[:3])]
+
+    matched_help = [
+        phrase for phrase in HELP_PHRASES
+        if phrase in text
+    ]
+
+    if matched_help:
+        score += 3
+        reasons.append("Help request or recommendation")
+
+    if "?" in text:
+        score += 2
+        reasons.append("Contains a question")
+
+    problem_words = [
+        "error", "failed", "failure", "bug",
+        "problem", "issue", "broken", "crash",
+        "cannot", "can't", "unable"
+    ]
+
+    if any(word in text for word in problem_words):
+        score += 2
+        reasons.append("Technical problem detected")
+
+    return score, reasons
 
 
 def main():
@@ -126,8 +143,9 @@ def main():
                 seen_ids.add(post_id)
 
                 raw_content = status.get("content", "")
+                score, reasons = score_post(raw_content)
 
-                if not is_candidate(raw_content):
+                if score < 4:
                     continue
 
                 account = status.get("account", {})
@@ -136,7 +154,9 @@ def main():
                     "id": post_id,
                     "user": account.get("acct", "Unknown"),
                     "url": status.get("url", ""),
-                    "text": clean_text(raw_content)
+                    "text": clean_text(raw_content),
+                    "score": score,
+                    "reasons": reasons
                 })
 
         except requests.RequestException as error:
@@ -144,10 +164,12 @@ def main():
 
     print("\n========== FILTER RESULTS ==========")
     print("Unique posts checked:", len(seen_ids))
-    print("Potential help requests:", len(candidates))
+    print("Potential conversations:", len(candidates))
 
     for index, post in enumerate(candidates, 1):
         print(f"\nCandidate {index}")
+        print("Score:", post["score"])
+        print("Reasons:", ", ".join(post["reasons"]))
         print("User:", post["user"])
         print("URL:", post["url"])
         print("Text:", post["text"][:400])
