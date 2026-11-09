@@ -25,25 +25,23 @@ SEARCH_TERMS = [
 ]
 
 TOPICS = [
-    "android", "vpn", "wireguard", "openvpn",
-    "shadowsocks", "v2ray", "xray", "proxy",
-    "dns", "firewall", "mock location",
-    "gps spoofing", "gps simulator",
-    "location simulator", "mobile app",
-    "android app", "android apps"
+    "vpn", "wireguard", "openvpn",
+    "shadowsocks", "v2ray", "xray",
+    "proxy", "dns", "firewall",
+    "mock location", "gps spoofing",
+    "gps simulator", "location simulator"
 ]
 
 HELP_PHRASES = [
-    "help", "how do", "how can",
-    "anyone know", "does anyone know",
-    "can someone", "could someone",
-    "looking for", "recommend",
-    "recommendation", "alternative",
-    "any solution", "is there a way",
-    "is it possible", "why does",
-    "why is", "what should i",
-    "what app", "which app",
-    "need advice", "any advice"
+    "need help", "please help",
+    "can someone help", "how do i",
+    "how can i", "anyone know",
+    "does anyone know", "looking for help",
+    "can anyone recommend",
+    "any recommendations", "which app",
+    "any alternative", "any solution",
+    "is there a way", "is it possible",
+    "what app", "what should i"
 ]
 
 PROBLEM_PHRASES = [
@@ -53,9 +51,8 @@ PROBLEM_PHRASES = [
     "connection problem", "connection issue",
     "having trouble", "having problems",
     "keeps crashing", "app crashes",
-    "error", "failed", "failure",
-    "bug", "broken", "problem",
-    "issue", "crash", "stopped working"
+    "error when", "failed to connect",
+    "stopped working", "getting an error"
 ]
 
 PROMO_PHRASES = [
@@ -73,73 +70,49 @@ def clean_text(content):
     content = re.sub(r"<[^>]+>", " ", content)
     content = html.unescape(content)
     content = re.sub(r"https?://\S+", " ", content)
-    content = re.sub(r"\s+", " ", content)
-    return content.strip().lower()
+    return re.sub(r"\s+", " ", content).strip().lower()
 
 
-def classify_post(content):
+def matches(text, phrases):
+    return [
+        p for p in phrases
+        if p in text
+    ]
+
+
+def classify(content):
     text = clean_text(content)
 
     topics = [
-        item for item in TOPICS
+        topic for topic in TOPICS
         if re.search(
-            r"(?<!\w)" + re.escape(item) + r"(?!\w)",
+            r"(?<!\w)" + re.escape(topic) + r"(?!\w)",
             text
         )
     ]
 
-    help_matches = [
-        phrase for phrase in HELP_PHRASES
-        if phrase in text
-    ]
+    if not topics:
+        return "UNRELATED", 0
 
-    problem_matches = [
-        phrase for phrase in PROBLEM_PHRASES
-        if phrase in text
-    ]
+    if matches(text, PROMO_PHRASES):
+        return "PROMOTIONAL", 0
 
-    promo_matches = [
-        phrase for phrase in PROMO_PHRASES
-        if phrase in text
-    ]
+    help_found = matches(text, HELP_PHRASES)
+    problem_found = matches(text, PROBLEM_PHRASES)
 
-    if promo_matches:
-        category = "PROMOTIONAL"
-        score = 0
+    if help_found and problem_found:
+        return "HELP_AND_PROBLEM", 8
 
-    elif not topics:
-        category = "UNRELATED"
-        score = 0
+    if help_found:
+        return "HELP_REQUEST", 6
 
-    elif help_matches and problem_matches:
-        category = "HELP_AND_PROBLEM"
-        score = 8
+    if problem_found:
+        return "TECHNICAL_PROBLEM", 6
 
-    elif help_matches:
-        category = "HELP_REQUEST"
-        score = 6
+    if "?" in text:
+        return "GENERAL_QUESTION", 3
 
-    elif problem_matches:
-        category = "TECHNICAL_PROBLEM"
-        score = 6
-
-    elif "?" in text:
-        category = "GENERAL_QUESTION"
-        score = 3
-
-    else:
-        category = "GENERAL_DISCUSSION"
-        score = 1
-
-    return {
-        "category": category,
-        "score": score,
-        "topics": topics[:5],
-        "help": help_matches[:4],
-        "problems": problem_matches[:4],
-        "promo": promo_matches[:3],
-        "text": text
-    }
+    return "GENERAL_DISCUSSION", 1
 
 
 def main():
@@ -151,12 +124,10 @@ def main():
         "Authorization": f"Bearer {TOKEN}"
     }
 
-    seen_ids = set()
+    seen = set()
     results = []
 
     for term in SEARCH_TERMS:
-        print("\nSearching:", term)
-
         try:
             response = requests.get(
                 f"{API_URL}/api/v2/search",
@@ -169,69 +140,70 @@ def main():
                 timeout=30
             )
 
-            print("HTTP Status:", response.status_code)
-
             if response.status_code != 200:
-                print("Search failed:", response.text[:200])
+                print("Search failed:", response.status_code)
                 continue
 
-            statuses = response.json().get(
-                "statuses", []
-            )
-
-            for status in statuses:
+            for status in response.json().get("statuses", []):
                 post_id = status.get("id")
 
-                if not post_id or post_id in seen_ids:
+                if not post_id or post_id in seen:
                     continue
 
-                seen_ids.add(post_id)
+                seen.add(post_id)
 
-                raw_content = status.get("content", "")
-                classification = classify_post(raw_content)
-
-                account = status.get("account", {})
+                category, score = classify(
+                    status.get("content", "")
+                )
 
                 results.append({
-                    "id": post_id,
-                    "user": account.get("acct", "Unknown"),
+                    "category": category,
+                    "score": score,
+                    "user": status.get(
+                        "account", {}
+                    ).get("acct", "Unknown"),
                     "url": status.get("url", ""),
-                    **classification
+                    "text": clean_text(
+                        status.get("content", "")
+                    )
                 })
 
         except requests.RequestException as error:
-            print("Network error:", str(error))
+            print("Network error:", error)
 
-    categories = {}
+    counts = {}
 
     for post in results:
         category = post["category"]
-        categories[category] = categories.get(category, 0) + 1
+        counts[category] = counts.get(category, 0) + 1
 
-    print("\n========== DIAGNOSTIC SUMMARY ==========")
-    print("Unique posts checked:", len(seen_ids))
+    print("\n===== FILTER SUMMARY =====")
+    print("Unique posts:", len(seen))
 
-    for category, count in sorted(categories.items()):
+    for category, count in sorted(counts.items()):
         print(f"{category}: {count}")
 
-    print("\n========== ALL CLASSIFIED POSTS ==========")
+    candidates = [
+        post for post in results
+        if post["score"] >= 6
+    ]
 
-    for index, post in enumerate(results, 1):
-        print(f"\nPost {index}")
-        print("Category:", post["category"])
-        print("Score:", post["score"])
-        print("Topics:", ", ".join(post["topics"]))
-        print("Help phrases:", ", ".join(post["help"]))
-        print("Problem phrases:", ", ".join(post["problems"]))
-        print("Promo phrases:", ", ".join(post["promo"]))
+    candidates.sort(
+        key=lambda post: post["score"],
+        reverse=True
+    )
+
+    print("\n===== TOP 5 CANDIDATES =====")
+
+    for index, post in enumerate(candidates[:5], 1):
+        print(f"\n{index}. {post['category']}")
         print("User:", post["user"])
         print("URL:", post["url"])
-        print("Text:", post["text"][:350])
+        print("Text:", post["text"][:220])
 
-    print("\nDiagnostic test completed.")
-    print("No replies were published.")
+    print("\nTest completed. No replies published.")
+    print("Total candidates:", len(candidates))
 
 
 if __name__ == "__main__":
     main()
-    
