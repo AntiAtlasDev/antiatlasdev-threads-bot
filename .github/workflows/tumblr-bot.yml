@@ -1,0 +1,25 @@
+name: Tumblr Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *' # كل 6 ساعات (آمن جداً)
+
+jobs:
+  reblog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests-oauthlib
+      - name: Run Tumblr Bot
+        env:
+          TUMBLR_CONSUMER_KEY: ${{ secrets.TUMBLR_CONSUMER_KEY }}
+          TUMBLR_CONSUMER_SECRET: ${{ secrets.TUMBLR_CONSUMER_SECRET }}
+          TUMBLR_TOKEN: ${{ secrets.TUMBLR_TOKEN }}
+          TUMBLR_TOKEN_SECRET: ${{ secrets.TUMBLR_TOKEN_SECRET }}
+          TUMBLR_BLOG_NAME: ${{ secrets.TUMBLR_BLOG_NAME }}
+        run: python tumblr_bot.py
