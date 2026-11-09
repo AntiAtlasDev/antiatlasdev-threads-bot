@@ -18,57 +18,70 @@ SEARCH_TERMS = [
     "Android proxy"
 ]
 
-TOPIC_KEYWORDS = [
+TOPICS = [
     "android", "vpn", "wireguard", "openvpn",
     "shadowsocks", "v2ray", "xray", "proxy",
     "dns", "firewall", "mock location",
     "gps spoofing", "gps simulator",
-    "location simulator", "mobile app",
-    "android app", "smartphone"
+    "location simulator", "android app",
+    "mobile app"
 ]
 
-INTENT_KEYWORDS = [
+HELP_REQUESTS = [
     "how do i", "how can i", "how to",
-    "anyone know", "does anyone", "can anyone",
-    "looking for", "need help", "help me",
-    "recommend", "recommendation",
-    "suggestion", "what is the best",
-    "which app", "any alternative",
-    "having trouble", "not working",
-    "problem with", "issue with",
-    "is there a way", "any solution",
-    "does anyone recommend"
+    "can someone help", "could someone help",
+    "need help", "please help",
+    "anyone know how", "does anyone know",
+    "looking for an app", "looking for a vpn",
+    "looking for an alternative",
+    "can anyone recommend", "any recommendations",
+    "which app should i", "what app can i",
+    "not working", "doesn't work",
+    "does not work", "having trouble",
+    "having problems", "cannot connect",
+    "can't connect", "connection problem",
+    "is there a way to"
 ]
 
-PROMO_KEYWORDS = [
+PROMO_PHRASES = [
     "sponsored", "affiliate link", "promo code",
     "buy now", "limited offer", "giveaway",
-    "discount code", "advertisement"
+    "discount code", "advertisement",
+    "meet our new", "introducing",
+    "check out our", "download now",
+    "available now", "new release",
+    "launching today", "get started today"
 ]
 
 
 def clean_text(content):
     content = re.sub(r"<[^>]+>", " ", content)
     content = html.unescape(content)
-    return re.sub(r"\s+", " ", content).strip()
+    content = re.sub(r"https?://\S+", " ", content)
+    return re.sub(r"\s+", " ", content).strip().lower()
+
+
+def contains_topic(text):
+    return any(
+        re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text)
+        for word in TOPICS
+    )
 
 
 def is_candidate(text):
-    text = text.lower()
+    text = clean_text(text)
 
-    if any(word in text for word in PROMO_KEYWORDS):
+    if any(phrase in text for phrase in PROMO_PHRASES):
         return False
 
-    has_topic = any(
-        word in text for word in TOPIC_KEYWORDS
-    )
+    if not contains_topic(text):
+        return False
 
-    has_intent = (
-        "?" in text or
-        any(word in text for word in INTENT_KEYWORDS)
-    )
+    # A clear help request is required.
+    if not any(phrase in text for phrase in HELP_REQUESTS):
+        return False
 
-    return has_topic and has_intent
+    return True
 
 
 def main():
@@ -112,11 +125,9 @@ def main():
 
                 seen_ids.add(post_id)
 
-                content = clean_text(
-                    status.get("content", "")
-                )
+                raw_content = status.get("content", "")
 
-                if not is_candidate(content):
+                if not is_candidate(raw_content):
                     continue
 
                 account = status.get("account", {})
@@ -125,7 +136,7 @@ def main():
                     "id": post_id,
                     "user": account.get("acct", "Unknown"),
                     "url": status.get("url", ""),
-                    "text": content
+                    "text": clean_text(raw_content)
                 })
 
         except requests.RequestException as error:
@@ -133,13 +144,13 @@ def main():
 
     print("\n========== FILTER RESULTS ==========")
     print("Unique posts checked:", len(seen_ids))
-    print("Potential conversations:", len(candidates))
+    print("Potential help requests:", len(candidates))
 
     for index, post in enumerate(candidates, 1):
         print(f"\nCandidate {index}")
         print("User:", post["user"])
         print("URL:", post["url"])
-        print("Text:", post["text"][:350])
+        print("Text:", post["text"][:400])
 
     print("\nTest completed. No replies were published.")
 
