@@ -97,7 +97,7 @@ def publish(article):
             "published": True,
             "canonical_url": article["link"],
             "description": description[:160],
-            "tags": "android,mobile,programming"
+            "tags": ["android", "mobile", "programming"]
         }
     }
 
@@ -188,4 +188,3 @@ if __name__ == "__main__":
     commit_history()
 
     print("Daily publications:", state["count"], "/", DAILY_LIMIT)
-  
