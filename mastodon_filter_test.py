@@ -2,11 +2,17 @@
 import os
 import re
 import html
+import time
 import requests
-from collections import Counter
+from datetime import datetime, timezone, timedelta
 
 API = "https://mastodon.social"
 TOKEN = os.getenv("MASTODON_ACCESS_TOKEN")
+
+MAX_REPLIES_PER_DAY = 10
+TARGET_URL = "https://fosstodon.org/@chrisn/117568462618314747"
+
+BLOG = "https://antiatlasdev-apps.blogspot.com/"
 
 SEARCH_TERMS = [
     "VPN recommendation",
@@ -19,8 +25,7 @@ SEARCH_TERMS = [
 
 TOPIC = re.compile(
     r"\b(vpn|virtual private network|dns|doh|dot|"
-    r"proxy|shadowsocks|wireguard|openvpn|v2ray|"
-    r"mock location|gps spoofing)\b",
+    r"proxy|shadowsocks|wireguard|openvpn|v2ray)\b",
     re.I,
 )
 
@@ -48,16 +53,15 @@ NEWS = re.compile(
 
 REQUEST = re.compile(
     r"\b(any recommendations?|any suggestions?|"
-    r"recommend me|can anyone recommend|"
-    r"could someone recommend|"
+    r"recommend me|recommendations for|"
+    r"need.{0,30}recommendations?|"
+    r"can anyone recommend|could someone recommend|"
     r"what vpn should i use|which vpn should i use|"
-    r"which vpn do you recommend|"
-    r"looking for|need help|help me|"
-    r"how do i fix|how can i fix|"
-    r"does anyone know how to fix|"
-    r"any idea why|what is causing|"
-    r"vpn alternatives|alternative to proton|"
-    r"alternative to nordvpn)\b",
+    r"which vpn do you recommend|looking for|"
+    r"need help|help me|how do i fix|how can i fix|"
+    r"does anyone know how to fix|any idea why|"
+    r"what is causing|vpn alternatives|"
+    r"alternative to proton|alternative to nordvpn)\b",
     re.I,
 )
 
@@ -69,6 +73,37 @@ PROBLEM = re.compile(
     r"dns leak|dns resolution problem)\b",
     re.I,
 )
+
+CHRISN_REPLY = """If you're looking for a stable VPN provider, Mullvad and IVPN are worth checking out.
+
+I'm also an independent Android developer behind AntiAtlasDev. I've published several networking apps and tools that you may find useful:
+
+• Custom Tunnel
+https://antiatlasdev-apps.blogspot.com/2026/11/custom-tunnel-and-mock-location.html
+
+• Slow DNS Tunnel
+https://antiatlasdev-apps.blogspot.com/2026/11/slow-dns-tunnel.html
+
+• Proxy Client VPN
+https://antiatlasdev-apps.blogspot.com/2026/11/proxy-client-vpn.html
+
+• DNS Changer
+https://antiatlasdev-apps.blogspot.com/2026/11/dns-changer.html
+
+• OpenVPN Client
+https://antiatlasdev-apps.blogspot.com/2026/11/openvpn-client.html
+
+• WireGuard VPN
+https://antiatlasdev-apps.blogspot.com/2026/11/wireguard-vpn.html
+
+Explore all my apps:
+https://antiatlasdev-apps.blogspot.com/
+
+These are Android networking tools and VPN clients, not VPN server subscriptions. Hope you find something useful!"""
+
+
+def headers():
+    return {"Authorization": f"Bearer {TOKEN}"}
 
 
 def clean_text(value):
@@ -83,46 +118,181 @@ def classify(text):
 
     if not TOPIC.search(text):
         return "UNRELATED"
-
     if SENSITIVE.search(text):
         return "SENSITIVE"
-
     if PROMO.search(text):
         return "PROMOTIONAL"
-
     if NEWS.search(text):
         return "NEWS"
-
     if REQUEST.search(text):
         return "HELP_REQUEST"
-
     if PROBLEM.search(text):
         return "TECHNICAL_PROBLEM"
 
     return "GENERAL_DISCUSSION"
 
 
+def get_account():
+    response = requests.get(
+        f"{API}/api/v1/accounts/verify_credentials",
+        headers=headers(),
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def search_posts(query):
     response = requests.get(
         f"{API}/api/v2/search",
-        headers={"Authorization": f"Bearer {TOKEN}"},
+        headers=headers(),
         params={
             "q": query,
             "type": "statuses",
             "limit": 10,
         },
-        timeout=(3, 5),
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json().get("statuses", [])
+
+
+def parse_date(value):
+    return datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+
+
+def get_recent_activity(account_id):
+    """Read recent replies to enforce the daily limit and avoid duplicates."""
+    since = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    history_limit = since - timedelta(days=7)
+
+    replied_ids = set()
+    replied_accounts_today = set()
+    daily_count = 0
+    max_id = None
+
+    for _ in range(10):
+        params = {
+            "limit": 40,
+            "exclude_reblogs": "true",
+        }
+        if max_id:
+            params["max_id"] = max_id
+
+        response = requests.get(
+            f"{API}/api/v1/accounts/{account_id}/statuses",
+            headers=headers(),
+            params=params,
+            timeout=15,
+        )
+        response.raise_for_status()
+
+        statuses = response.json()
+        if not statuses:
+            break
+
+        stop = False
+
+        for status in statuses:
+            created = parse_date(status["created_at"])
+
+            if created < history_limit:
+                stop = True
+                break
+
+            target_id = status.get("in_reply_to_id")
+
+            if target_id:
+                replied_ids.add(str(target_id))
+
+                if created >= since:
+                    daily_count += 1
+                    author_id = status.get("account", {}).get("id")
+                    if author_id:
+                        replied_accounts_today.add(str(author_id))
+
+        max_id = statuses[-1]["id"]
+
+        if stop:
+            break
+
+    return daily_count, replied_ids, replied_accounts_today
+
+
+def build_reply(post, category):
+    post_url = post.get("url", "")
+
+    if post_url == TARGET_URL:
+        return CHRISN_REPLY
+
+    if category == "HELP_REQUEST":
+        return (
+            "If you're looking for Android networking tools rather "
+            "than a VPN subscription, I'm an independent developer "
+            "behind AntiAtlasDev. My apps include VPN clients and "
+            "DNS tools. You can explore them here:\n"
+            + BLOG
+        )
+
+    if category == "TECHNICAL_PROBLEM":
+        return (
+            "For Android network troubleshooting, I develop "
+            "networking tools including DNS Changer and VPN clients. "
+            "They may help with testing, although they cannot fix "
+            "problems caused by a VPN provider or network itself:\n"
+            + BLOG
+        )
+
+    return None
+
+
+def publish_reply(post, message):
+    response = requests.post(
+        f"{API}/api/v1/statuses",
+        headers=headers(),
+        data={
+            "status": message,
+            "in_reply_to_id": str(post["id"]),
+            "visibility": "public",
+        },
+        timeout=20,
     )
 
-    print(f"{query}: HTTP {response.status_code}", flush=True)
-    response.raise_for_status()
+    if response.status_code not in (200, 201):
+        print(
+            f"Publish failed: HTTP {response.status_code} "
+            f"{response.text[:300]}",
+            flush=True,
+        )
+        return None
 
-    return response.json().get("statuses", [])
+    return response.json()
 
 
 def main():
     if not TOKEN:
-        print("ERROR: MASTODON_ACCESS_TOKEN is missing.")
+        raise RuntimeError("MASTODON_ACCESS_TOKEN is missing.")
+
+    account = get_account()
+    my_id = str(account["id"])
+
+    print(f"Authenticated: @{account['acct']}", flush=True)
+
+    daily_count, replied_ids, replied_accounts = (
+        get_recent_activity(my_id)
+    )
+
+    print(
+        f"Replies today: {daily_count}/{MAX_REPLIES_PER_DAY}",
+        flush=True,
+    )
+
+    if daily_count >= MAX_REPLIES_PER_DAY:
+        print("Daily reply limit reached.", flush=True)
         return
 
     seen = {}
@@ -130,61 +300,89 @@ def main():
     for query in SEARCH_TERMS:
         try:
             for post in search_posts(query):
-                post_id = post.get("id")
-
-                if post_id:
-                    seen[str(post_id)] = post
-
+                if post.get("id"):
+                    seen[str(post["id"])] = post
         except requests.RequestException as error:
-            print(f"Search error: {error}", flush=True)
+            print(f"Search error ({query}): {error}", flush=True)
 
-    print(f"\nUnique posts: {len(seen)}", flush=True)
-
-    counts = Counter()
     candidates = []
 
     for post in seen.values():
+        account_data = post.get("account", {})
+        author_id = str(account_data.get("id", ""))
+
+        if author_id == my_id:
+            continue
+
+        if post.get("in_reply_to_id"):
+            continue
+
+        if post.get("visibility") not in ("public", "unlisted"):
+            continue
+
         content = clean_text(post.get("content", ""))
         category = classify(content)
 
-        counts[category] += 1
+        # The explicitly approved Chrisn post is handled separately.
+        is_chrisn = post.get("url") == TARGET_URL
 
-        if category in (
+        if not is_chrisn and category not in (
             "HELP_REQUEST",
             "TECHNICAL_PROBLEM",
-            "GENERAL_DISCUSSION",
         ):
-            candidates.append((post, category))
+            continue
 
-    print("\nClassification:", flush=True)
+        candidates.append((post, category))
 
-    for category, count in sorted(counts.items()):
-        print(f"{category}: {count}", flush=True)
-
-    print(
-        f"\nTechnical posts for review: {len(candidates)}",
-        flush=True,
+    # Give the previously approved post priority.
+    candidates.sort(
+        key=lambda item: item[0].get("url") != TARGET_URL
     )
 
-    if not candidates:
-        print("No technical posts found.", flush=True)
+    published = 0
 
-    for index, (post, category) in enumerate(candidates, 1):
-        account = post.get("account", {})
-        username = account.get("acct", "unknown")
+    for post, category in candidates:
+        if daily_count + published >= MAX_REPLIES_PER_DAY:
+            break
 
-        print("\n" + "=" * 45, flush=True)
-        print(f"POST {index}", flush=True)
-        print(f"Category: {category}", flush=True)
-        print(f"Account: @{username}", flush=True)
+        post_id = str(post["id"])
+        author_id = str(post.get("account", {}).get("id", ""))
+
+        if post_id in replied_ids:
+            continue
+
+        # Avoid replying repeatedly to the same account in one day.
+        if author_id in replied_accounts:
+            continue
+
+        message = build_reply(post, category)
+        if not message:
+            continue
+
         print(
-            f"Text: {clean_text(post.get('content', ''))[:700]}",
+            f"Replying to @{post['account'].get('acct', 'unknown')}",
             flush=True,
         )
-        print(f"URL: {post.get('url', '')}", flush=True)
 
-    print("\nFilter completed.", flush=True)
-    print("No replies were published.", flush=True)
+        result = publish_reply(post, message)
+
+        if result:
+            published += 1
+            replied_ids.add(post_id)
+            replied_accounts.add(author_id)
+
+            print(
+                f"Published successfully: {result.get('url')}",
+                flush=True,
+            )
+
+            time.sleep(15)
+
+    print(
+        f"Finished. New replies: {published}. "
+        f"Daily total: {daily_count + published}/{MAX_REPLIES_PER_DAY}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
