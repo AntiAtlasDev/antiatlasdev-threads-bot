@@ -15,9 +15,8 @@ SEARCH_TERMS = [
     "mock location", "GPS spoofing",
     "Android proxy", "SOCKS5 proxy",
     "HTTP proxy", "firewall",
-    "VPN recommendation",
-    "VPN alternative", "VPN not working",
-    "app connection problem"
+    "VPN recommendation", "VPN alternative",
+    "VPN not working", "app connection problem"
 ]
 
 TOPICS = [
@@ -71,6 +70,22 @@ PROMO_PHRASES = [
     "sign up using my link"
 ]
 
+HARDWARE_TERMS = [
+    "gpu", "graphics card", "graphics cards",
+    "processor", "chipset", "ssd",
+    "ram prices", "motherboard",
+    "memory prices", "chip prices",
+    "graphics driver", "benchmark"
+]
+
+RECOMMENDATION_TERMS = [
+    "recommend a vpn", "vpn recommendation",
+    "vpn service", "vpn alternative",
+    "looking for a vpn", "which vpn",
+    "what vpn", "dns provider",
+    "dns alternative", "proxy recommendation"
+]
+
 
 def clean_text(content):
     content = re.sub(r"<[^>]+>", " ", content)
@@ -80,15 +95,13 @@ def clean_text(content):
 
 
 def matches(text, phrases):
-    found = []
-
-    for phrase in phrases:
-        pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
-
-        if re.search(pattern, text):
-            found.append(phrase)
-
-    return found
+    return [
+        phrase for phrase in phrases
+        if re.search(
+            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)",
+            text
+        )
+    ]
 
 
 def classify(content):
@@ -102,8 +115,18 @@ def classify(content):
     if matches(text, PROMO_PHRASES):
         return "PROMOTIONAL", 0
 
+    if matches(text, HARDWARE_TERMS):
+        return "HARDWARE", 0
+
+    recommendation_found = matches(
+        text, RECOMMENDATION_TERMS
+    )
+
     help_found = matches(text, HELP_PHRASES)
     problem_found = matches(text, PROBLEM_PHRASES)
+
+    if recommendation_found:
+        return "HELP_REQUEST", 10
 
     if help_found and problem_found:
         return "HELP_AND_PROBLEM", 9
@@ -213,4 +236,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
