@@ -12,7 +12,8 @@ from atproto import Client
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 
 HISTORY_FILE = "bluesky_used_articles.json"
-STATE_FILE = "bluesky_daily_state.json"
+# تم تغيير اسم ملف الحالة لتجاوز الملف القديم الذي يسبب الخطأ
+STATE_FILE = "bluesky_daily_state_v2.json"
 
 # الحدود اليومية
 DAILY_LIMIT_POSTS = 5
@@ -74,6 +75,7 @@ def save_json(filename, data):
 def get_daily_state():
     today = datetime.now(timezone.utc).date().isoformat()
 
+    # تم استخدام .get() لتجنب أي أخطاء إذا كان الملف فارغاً
     state = load_json(STATE_FILE, {
         "date": today,
         "posts_count": 0,
@@ -86,6 +88,9 @@ def get_daily_state():
             "posts_count": 0,
             "replies_count": 0
         }
+    elif "posts_count" not in state or "replies_count" not in state:
+        state["posts_count"] = state.get("posts_count", 0)
+        state["replies_count"] = state.get("replies_count", 0)
 
     return state
 
@@ -108,12 +113,12 @@ def login_bluesky():
     client.login(handle, password)
     return client
 
-def process_replies(client):
+def process_replies(client, max_replies):
     print("--- Processing Replies ---")
     replies_made = 0
     
     for query in SEARCH_QUERIES:
-        if replies_made >= DAILY_LIMIT_REPLIES:
+        if replies_made >= max_replies:
             break
             
         try:
@@ -129,11 +134,14 @@ def process_replies(client):
                     continue
                     
                 # تجنب الرد إذا كان منشوراً قديماً (أكثر من 24 ساعة)
-                created_at = datetime.fromisoformat(post.record.created_at.replace('Z', '+00:00'))
-                if (datetime.now(timezone.utc) - created_at).days >= 1:
-                    continue
+                try:
+                    created_at = datetime.fromisoformat(post.record.created_at.replace('Z', '+00:00'))
+                    if (datetime.now(timezone.utc) - created_at).days >= 1:
+                        continue
+                except:
+                    pass
 
-                # نصوص الردود
+                # نصوص الردود العشوائية
                 replies = [
                     "If you're looking for Android network tools, I develop independent apps for VPNs, DNS, and network diagnostics. Check them out here: https://antiatlasdev-apps.blogspot.com/",
                     "As an Android dev, I build utilities for networking and security. You might find something useful here: https://antiatlasdev-apps.blogspot.com/"
@@ -151,7 +159,7 @@ def process_replies(client):
                 replies_made += 1
                 time.sleep(15) # انتظار بين الردود
                 
-                if replies_made >= DAILY_LIMIT_REPLIES:
+                if replies_made >= max_replies:
                     break
                     
         except Exception as e:
@@ -178,6 +186,10 @@ def commit_history():
             subprocess.run(["git", "commit", "-m", "Update Bluesky history"], check=True)
             subprocess.run(["git", "push"], check=True)
             print("Bluesky history saved.")
+        elif result.returncode == 0:
+            print("No history changes.")
+        else:
+            raise RuntimeError("Git diff failed.")
     except Exception as error:
         print("History save error:", error)
         raise
@@ -186,19 +198,21 @@ if __name__ == "__main__":
     print("AntiAtlasDev Bluesky Bot - Posts & Replies")
     
     state = get_daily_state()
-    print(f"Today's posts: {state['posts_count']}/{DAILY_LIMIT_POSTS}")
-    print(f"Today's replies: {state['replies_count']}/{DAILY_LIMIT_REPLIES}")
+    print(f"Today's posts: {state.get('posts_count', 0)}/{DAILY_LIMIT_POSTS}")
+    print(f"Today's replies: {state.get('replies_count', 0)}/{DAILY_LIMIT_REPLIES}")
 
     client = login_bluesky()
 
-    # 1. معالجة الردود أولاً (إذا لم نصل للحد الأقصى)
-    if state["replies_count"] < DAILY_LIMIT_REPLIES:
-        remaining_replies = DAILY_LIMIT_REPLIES - state["replies_count"]
+    # 1. معالجة الردود أولاً
+    current_replies = state.get("replies_count", 0)
+    if current_replies < DAILY_LIMIT_REPLIES:
+        remaining_replies = DAILY_LIMIT_REPLIES - current_replies
         new_replies = process_replies(client, remaining_replies)
-        state["replies_count"] += new_replies
+        state["replies_count"] = current_replies + new_replies
 
-    # 2. نشر مقال جديد (إذا لم نصل للحد الأقصى)
-    if state["posts_count"] < DAILY_LIMIT_POSTS:
+    # 2. نشر مقال جديد
+    current_posts = state.get("posts_count", 0)
+    if current_posts < DAILY_LIMIT_POSTS:
         articles = get_articles()
         history = load_json(HISTORY_FILE, [])
         article = select_article(articles, history)
@@ -211,11 +225,11 @@ if __name__ == "__main__":
             )
             publish_to_bluesky(client, post_text)
             history.append(article["link"])
-            state["posts_count"] += 1
+            state["posts_count"] = current_posts + 1
             save_json(HISTORY_FILE, history)
 
     # حفظ الحالة النهائية
     save_json(STATE_FILE, state)
     commit_history()
 
-    print(f"Finished. Posts: {state['posts_count']}, Replies: {state['replies_count']}")
+    print(f"Finished. Posts: {state.get('posts_count', 0)}, Replies: {state.get('replies_count', 0)}")
