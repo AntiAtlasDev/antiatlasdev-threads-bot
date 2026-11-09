@@ -1,8 +1,9 @@
 
 import os
+import re
+import html
 import requests
 from requests.adapters import HTTPAdapter
-from urllib.parse import urlparse
 
 API_URL = "https://mastodon.social"
 ACCESS_TOKEN = os.environ.get("MASTODON_ACCESS_TOKEN")
@@ -13,48 +14,68 @@ SEARCH_TERMS = [
     "DNS problem",
 ]
 
-TOPICS = [
-    "vpn", "wireguard", "openvpn", "shadowsocks",
-    "v2ray", "xray", "proxy", "dns", "firewall",
-    "mock location", "gps spoofing", "gps simulator",
-    "location simulator", "socks5", "doh", "dot",
-    "dns over https", "dns over tls",
-]
+TOPIC_PATTERN = re.compile(
+    r"\b(vpn|wireguard|openvpn|shadowsocks|v2ray|xray|"
+    r"proxy|dns|firewall|socks5|doh|dot|"
+    r"mock location|gps spoofing|gps simulator|"
+    r"location simulator|dns over https|dns over tls)\b",
+    re.IGNORECASE,
+)
 
-PROMO_PHRASES = [
-    "buy now", "discount", "promo code",
-    "referral link", "sign up using",
-    "follow me", "giveaway",
-]
+RECOMMENDATION_PATTERN = re.compile(
+    r"\b(recommend(?:ation|ations|ed)?|"
+    r"suggest(?:ion|ions|ed)?|"
+    r"alternative(?:s)? to|"
+    r"looking for|"
+    r"which vpn|what vpn|"
+    r"any good vpn|"
+    r"need a vpn|"
+    r"need vpn)\b",
+    re.IGNORECASE,
+)
 
-HELP_PHRASES = [
-    "need help", "can someone help",
-    "any advice", "any suggestions",
-    "how do i", "how can i", "does anyone know",
-    "looking for", "recommend", "recommendation",
-    "alternative to", "alternatives to",
-    "what vpn", "which vpn", "any vpn",
-]
+HELP_PATTERN = re.compile(
+    r"\b(need help|can someone help|"
+    r"how do i|how can i|"
+    r"any advice|"
+    r"does anyone know|"
+    r"can't configure|cannot configure|"
+    r"help with)\b",
+    re.IGNORECASE,
+)
 
-PROBLEM_PHRASES = [
-    "not working", "doesn't work", "does not work",
-    "stopped working", "connection failed",
-    "cannot connect", "can't connect",
-    "blocked", "leaking", "leak",
-    "issue with", "problem with", "error",
-    "slow connection", "disconnects",
-]
+PROBLEM_PATTERN = re.compile(
+    r"\b(not working|doesn't work|does not work|"
+    r"stopped working|connection failed|"
+    r"cannot connect|can't connect|"
+    r"blocked|leaking|leak|"
+    r"issue|problem|error|"
+    r"disconnects|slow connection)\b",
+    re.IGNORECASE,
+)
 
-RECOMMENDATION_TERMS = [
-    "recommend", "recommendation", "alternative",
-    "alternatives", "suggestion", "suggestions",
-    "looking for", "which vpn", "what vpn",
-]
+PROMO_PATTERN = re.compile(
+    r"\b(buy now|discount code|promo code|"
+    r"referral link|giveaway|"
+    r"sign up using my link)\b",
+    re.IGNORECASE,
+)
 
-HARDWARE_TERMS = [
-    "gpu", "cpu", "ram", "ssd", "motherboard",
-    "graphics card", "processor", "laptop",
-]
+SENSITIVE_PATTERN = re.compile(
+    r"\b(election|elections|political|politics|"
+    r"politician|fascist|fascists|fascism|"
+    r"nazi|nazis|religion|religious|"
+    r"prayer|god|jesus|allah|"
+    r"suicide|psychological help|"
+    r"mental health hotline)\b",
+    re.IGNORECASE,
+)
+
+HARDWARE_PATTERN = re.compile(
+    r"\b(gpu|cpu|ram|ssd|motherboard|"
+    r"graphics card|processor)\b",
+    re.IGNORECASE,
+)
 
 session = requests.Session()
 session.headers.update({
@@ -67,54 +88,59 @@ session.mount(
 )
 
 
-def contains_any(text, phrases):
-    return any(phrase in text for phrase in phrases)
+def clean_text(content):
+    content = html.unescape(content or "")
+    content = re.sub(r"<[^>]+>", " ", content)
+    content = re.sub(r"\s+", " ", content)
+    return content.strip()
+
+
+def split_sentences(text):
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", text)
+        if sentence.strip()
+    ]
 
 
 def classify(post):
-    content = post.get("content", "")
-    text = content.lower()
-
-    # Remove HTML tags
-    import re
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-
+    text = clean_text(post.get("content", ""))
     if not text:
         return "UNRELATED", 0
 
-    # Must mention at least one relevant topic
-    if not contains_any(text, TOPICS):
-        return "UNRELATED", 0
+    # Exclude sensitive discussions
+    if SENSITIVE_PATTERN.search(text):
+        return "SENSITIVE", 0
 
-    # Exclude obvious advertisements
-    if contains_any(text, PROMO_PHRASES):
+    # Exclude advertisements
+    if PROMO_PATTERN.search(text):
         return "PROMOTIONAL", 0
 
-    # Exclude unrelated hardware discussions
-    if contains_any(text, HARDWARE_TERMS):
-        return "UNRELATED", 0
+    sentences = split_sentences(text)
 
-    has_help = contains_any(text, HELP_PHRASES)
-    has_problem = contains_any(text, PROBLEM_PHRASES)
-    has_recommendation = contains_any(text, RECOMMENDATION_TERMS)
+    for sentence in sentences:
+        has_topic = bool(TOPIC_PATTERN.search(sentence))
 
-    if has_recommendation:
-        return "RECOMMENDATION", 10
+        if not has_topic:
+            continue
 
-    if has_help and has_problem:
-        return "HELP_AND_PROBLEM", 9
+        # Ignore hardware-focused sentences
+        if HARDWARE_PATTERN.search(sentence):
+            continue
 
-    if has_problem:
-        return "TECHNICAL_PROBLEM", 8
+        if RECOMMENDATION_PATTERN.search(sentence):
+            return "RECOMMENDATION", 10
 
-    if has_help:
-        return "HELP_REQUEST", 8
+        if HELP_PATTERN.search(sentence):
+            return "HELP_REQUEST", 9
 
-    if "?" in text:
-        return "GENERAL_QUESTION", 6
+        if PROBLEM_PATTERN.search(sentence):
+            return "TECHNICAL_PROBLEM", 9
 
-    return "GENERAL_DISCUSSION", 4
+        if "?" in sentence:
+            return "RELATED_QUESTION", 7
+
+    return "GENERAL_DISCUSSION", 0
 
 
 def search_posts(term):
@@ -137,16 +163,14 @@ def search_posts(term):
         )
 
         response.raise_for_status()
-        data = response.json()
-
-        return data.get("statuses", [])
+        return response.json().get("statuses", [])
 
     except requests.RequestException as error:
-        print(f"Search failed ({term}): {error}", flush=True)
+        print(f"Search failed: {error}", flush=True)
         return []
 
     except ValueError:
-        print(f"Invalid JSON response ({term})", flush=True)
+        print("Invalid JSON response.", flush=True)
         return []
 
 
@@ -158,76 +182,62 @@ def main():
     unique_posts = {}
 
     for term in SEARCH_TERMS:
-        posts = search_posts(term)
-
-        for post in posts:
+        for post in search_posts(term):
             post_id = post.get("id")
             if post_id:
                 unique_posts[post_id] = post
 
-    print("\n========== SEARCH SUMMARY ==========", flush=True)
-    print(f"Unique posts: {len(unique_posts)}", flush=True)
+    print("\n========== SEARCH SUMMARY ==========")
+    print(f"Unique posts: {len(unique_posts)}")
 
-    results = []
+    categories = {}
+    candidates = []
 
     for post in unique_posts.values():
         category, score = classify(post)
 
-        results.append({
-            "post": post,
-            "category": category,
-            "score": score,
-        })
-
-    categories = {}
-
-    for item in results:
-        category = item["category"]
         categories[category] = categories.get(category, 0) + 1
 
-    print("\n========== CATEGORIES ==========", flush=True)
+        if score >= 7:
+            candidates.append({
+                "post": post,
+                "category": category,
+                "score": score,
+            })
+
+    print("\n========== CATEGORIES ==========")
 
     for category, count in sorted(categories.items()):
-        print(f"{category}: {count}", flush=True)
-
-    candidates = [
-        item for item in results
-        if item["score"] >= 6
-    ]
+        print(f"{category}: {count}")
 
     candidates.sort(
         key=lambda item: item["score"],
         reverse=True
     )
 
-    print("\n========== TOP CANDIDATES ==========", flush=True)
+    print("\n========== QUALIFIED CANDIDATES ==========")
 
     if not candidates:
-        print("No suitable candidates found.", flush=True)
+        print("No qualified candidates found.")
 
     for index, item in enumerate(candidates[:10], 1):
         post = item["post"]
-
         account = post.get("account", {})
+
         username = account.get("acct", "Unknown")
-
-        content = post.get("content", "")
-        import re
-        content = re.sub(r"<[^>]+>", " ", content)
-        content = re.sub(r"\s+", " ", content).strip()
-
+        text = clean_text(post.get("content", ""))
         url = post.get("url", "")
 
-        print(f"\n{index}. @{username}", flush=True)
+        print(f"\n{index}. @{username}")
         print(
-            f"Category: {item['category']} | Score: {item['score']}",
-            flush=True
+            f"Category: {item['category']} "
+            f"| Score: {item['score']}"
         )
-        print(f"Text: {content[:500]}", flush=True)
-        print(f"URL: {url}", flush=True)
+        print(f"Text: {text[:500]}")
+        print(f"URL: {url}")
 
-    print("\n========== TEST FINISHED ==========", flush=True)
-    print("No replies were published.", flush=True)
+    print("\n========== TEST FINISHED ==========")
+    print("No replies were published.")
 
 
 if __name__ == "__main__":
