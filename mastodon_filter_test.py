@@ -8,20 +8,19 @@ API_URL = "https://mastodon.social"
 TOKEN = os.environ.get("MASTODON_ACCESS_TOKEN")
 
 SEARCH_TERMS = [
-    "Android VPN",
-    "WireGuard",
-    "OpenVPN",
-    "Android DNS",
-    "Android GPS",
-    "Android firewall",
-    "mock location",
+    "Android VPN problem",
+    "Android VPN recommendation",
+    "Android WireGuard",
+    "Android OpenVPN",
+    "Android DNS problem",
+    "Android GPS problem",
     "Android proxy",
-    "Android app problem",
-    "VPN not working",
-    "DNS problem",
-    "GPS problem",
-    "Android help",
-    "VPN recommendation"
+    "Android firewall",
+    "Android app not working",
+    "Android mock location",
+    "Android VPN alternative",
+    "smartphone VPN problem",
+    "Android connection issue"
 ]
 
 TOPICS = [
@@ -30,6 +29,15 @@ TOPICS = [
     "proxy", "dns", "firewall",
     "mock location", "gps spoofing",
     "gps simulator", "location simulator"
+]
+
+ANDROID_CONTEXT = [
+    "android", "android phone", "android app",
+    "android device", "android tablet",
+    "smartphone", "mobile phone",
+    "samsung galaxy", "google pixel",
+    "oneplus", "xiaomi phone",
+    "redmi phone", "mobile device"
 ]
 
 HELP_PHRASES = [
@@ -41,7 +49,8 @@ HELP_PHRASES = [
     "any recommendations", "which app",
     "any alternative", "any solution",
     "is there a way", "is it possible",
-    "what app", "what should i"
+    "what app", "what should i",
+    "what vpn", "which vpn"
 ]
 
 PROBLEM_PHRASES = [
@@ -52,7 +61,9 @@ PROBLEM_PHRASES = [
     "having trouble", "having problems",
     "keeps crashing", "app crashes",
     "error when", "failed to connect",
-    "stopped working", "getting an error"
+    "stopped working", "getting an error",
+    "doesn't connect", "not connecting",
+    "connection keeps dropping"
 ]
 
 PROMO_PHRASES = [
@@ -62,7 +73,15 @@ PROMO_PHRASES = [
     "discount code", "advertisement",
     "introducing our", "meet our new",
     "download now", "get started today",
-    "launching our"
+    "launching our", "use my referral",
+    "sign up using my link"
+]
+
+HARDWARE_TERMS = [
+    "gpu", "graphics card", "ssd",
+    "ram prices", "processor",
+    "motherboard", "chipset",
+    "graphics driver", "benchmark"
 ]
 
 
@@ -74,22 +93,21 @@ def clean_text(content):
 
 
 def matches(text, phrases):
-    return [
-        p for p in phrases
-        if p in text
-    ]
+    found = []
+
+    for phrase in phrases:
+        pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
+
+        if re.search(pattern, text):
+            found.append(phrase)
+
+    return found
 
 
 def classify(content):
     text = clean_text(content)
 
-    topics = [
-        topic for topic in TOPICS
-        if re.search(
-            r"(?<!\w)" + re.escape(topic) + r"(?!\w)",
-            text
-        )
-    ]
+    topics = matches(text, TOPICS)
 
     if not topics:
         return "UNRELATED", 0
@@ -97,20 +115,28 @@ def classify(content):
     if matches(text, PROMO_PHRASES):
         return "PROMOTIONAL", 0
 
+    android_found = matches(text, ANDROID_CONTEXT)
+
+    if not android_found:
+        return "NON_ANDROID", 0
+
+    if matches(text, HARDWARE_TERMS):
+        return "HARDWARE", 0
+
     help_found = matches(text, HELP_PHRASES)
     problem_found = matches(text, PROBLEM_PHRASES)
 
     if help_found and problem_found:
-        return "HELP_AND_PROBLEM", 8
+        return "HELP_AND_PROBLEM", 9
 
     if help_found:
-        return "HELP_REQUEST", 6
+        return "HELP_REQUEST", 7
 
     if problem_found:
-        return "TECHNICAL_PROBLEM", 6
+        return "TECHNICAL_PROBLEM", 7
 
     if "?" in text:
-        return "GENERAL_QUESTION", 3
+        return "GENERAL_QUESTION", 4
 
     return "GENERAL_DISCUSSION", 1
 
@@ -152,9 +178,11 @@ def main():
 
                 seen.add(post_id)
 
-                category, score = classify(
+                text = clean_text(
                     status.get("content", "")
                 )
+
+                category, score = classify(text)
 
                 results.append({
                     "category": category,
@@ -163,9 +191,7 @@ def main():
                         "account", {}
                     ).get("acct", "Unknown"),
                     "url": status.get("url", ""),
-                    "text": clean_text(
-                        status.get("content", "")
-                    )
+                    "text": text
                 })
 
         except requests.RequestException as error:
@@ -177,7 +203,7 @@ def main():
         category = post["category"]
         counts[category] = counts.get(category, 0) + 1
 
-    print("\n===== FILTER SUMMARY =====")
+    print("\n===== ANDROID FILTER SUMMARY =====")
     print("Unique posts:", len(seen))
 
     for category, count in sorted(counts.items()):
@@ -185,7 +211,7 @@ def main():
 
     candidates = [
         post for post in results
-        if post["score"] >= 6
+        if post["score"] >= 7
     ]
 
     candidates.sort(
@@ -193,7 +219,7 @@ def main():
         reverse=True
     )
 
-    print("\n===== TOP 5 CANDIDATES =====")
+    print("\n===== TOP 5 ANDROID CANDIDATES =====")
 
     for index, post in enumerate(candidates[:5], 1):
         print(f"\n{index}. {post['category']}")
