@@ -15,41 +15,35 @@ SEARCH_TERMS = [
     "Android GPS",
     "Android firewall",
     "mock location",
-    "Android proxy"
+    "Android proxy",
+    "Android app problem",
+    "VPN not working",
+    "DNS problem",
+    "GPS problem",
+    "Android help",
+    "VPN recommendation"
 ]
 
 TOPICS = [
-    "android vpn", "vpn", "wireguard", "openvpn",
+    "android", "vpn", "wireguard", "openvpn",
     "shadowsocks", "v2ray", "xray", "proxy",
     "dns", "firewall", "mock location",
     "gps spoofing", "gps simulator",
-    "location simulator", "android app",
-    "android apps", "mobile app", "mobile apps"
-]
-
-PROMO_PHRASES = [
-    "sponsored", "affiliate link", "promo code",
-    "buy now", "limited offer", "giveaway",
-    "discount code", "advertisement",
-    "introducing our", "meet our new",
-    "download now", "available now",
-    "check out our", "get started today",
-    "features include", "launching our"
+    "location simulator", "mobile app",
+    "android app", "android apps"
 ]
 
 HELP_PHRASES = [
-    "need help", "please help",
-    "can someone help", "could someone help",
-    "how do i", "how can i",
-    "how do i fix", "how can i fix",
+    "help", "how do", "how can",
     "anyone know", "does anyone know",
-    "can anyone recommend",
-    "any recommendations",
-    "which app", "any alternative",
+    "can someone", "could someone",
+    "looking for", "recommend",
+    "recommendation", "alternative",
     "any solution", "is there a way",
     "is it possible", "why does",
-    "why is", "looking for help",
-    "has anyone experienced"
+    "why is", "what should i",
+    "what app", "which app",
+    "need advice", "any advice"
 ]
 
 PROBLEM_PHRASES = [
@@ -59,9 +53,19 @@ PROBLEM_PHRASES = [
     "connection problem", "connection issue",
     "having trouble", "having problems",
     "keeps crashing", "app crashes",
-    "error when", "failed to connect",
-    "doesn't connect", "stopped working",
-    "broken after", "getting an error"
+    "error", "failed", "failure",
+    "bug", "broken", "problem",
+    "issue", "crash", "stopped working"
+]
+
+PROMO_PHRASES = [
+    "sponsored", "affiliate link",
+    "promo code", "buy now",
+    "limited offer", "giveaway",
+    "discount code", "advertisement",
+    "introducing our", "meet our new",
+    "download now", "get started today",
+    "launching our"
 ]
 
 
@@ -69,53 +73,73 @@ def clean_text(content):
     content = re.sub(r"<[^>]+>", " ", content)
     content = html.unescape(content)
     content = re.sub(r"https?://\S+", " ", content)
-    return re.sub(r"\s+", " ", content).strip().lower()
+    content = re.sub(r"\s+", " ", content)
+    return content.strip().lower()
 
 
-def score_post(content):
+def classify_post(content):
     text = clean_text(content)
 
-    if any(phrase in text for phrase in PROMO_PHRASES):
-        return 0, ["Promotional content"]
-
-    matched_topics = [
-        word for word in TOPICS if word in text
+    topics = [
+        item for item in TOPICS
+        if re.search(
+            r"(?<!\w)" + re.escape(item) + r"(?!\w)",
+            text
+        )
     ]
 
-    if not matched_topics:
-        return 0, ["No relevant technical topic"]
-
-    has_help = any(
-        phrase in text for phrase in HELP_PHRASES
-    )
-
-    has_problem = any(
-        phrase in text for phrase in PROBLEM_PHRASES
-    )
-
-    if not has_help and not has_problem:
-        return 0, [
-            "No clear help request or technical problem"
-        ]
-
-    score = 5
-    reasons = [
-        "Relevant topic: " + ", ".join(matched_topics[:3])
+    help_matches = [
+        phrase for phrase in HELP_PHRASES
+        if phrase in text
     ]
 
-    if has_help:
-        score += 2
-        reasons.append("Explicit help request")
+    problem_matches = [
+        phrase for phrase in PROBLEM_PHRASES
+        if phrase in text
+    ]
 
-    if has_problem:
-        score += 2
-        reasons.append("Specific technical problem")
+    promo_matches = [
+        phrase for phrase in PROMO_PHRASES
+        if phrase in text
+    ]
 
-    if "?" in text:
-        score += 1
-        reasons.append("Contains a question")
+    if promo_matches:
+        category = "PROMOTIONAL"
+        score = 0
 
-    return score, reasons
+    elif not topics:
+        category = "UNRELATED"
+        score = 0
+
+    elif help_matches and problem_matches:
+        category = "HELP_AND_PROBLEM"
+        score = 8
+
+    elif help_matches:
+        category = "HELP_REQUEST"
+        score = 6
+
+    elif problem_matches:
+        category = "TECHNICAL_PROBLEM"
+        score = 6
+
+    elif "?" in text:
+        category = "GENERAL_QUESTION"
+        score = 3
+
+    else:
+        category = "GENERAL_DISCUSSION"
+        score = 1
+
+    return {
+        "category": category,
+        "score": score,
+        "topics": topics[:5],
+        "help": help_matches[:4],
+        "problems": problem_matches[:4],
+        "promo": promo_matches[:3],
+        "text": text
+    }
 
 
 def main():
@@ -128,10 +152,10 @@ def main():
     }
 
     seen_ids = set()
-    candidates = []
+    results = []
 
     for term in SEARCH_TERMS:
-        print(f"\nSearching: {term}")
+        print("\nSearching:", term)
 
         try:
             response = requests.get(
@@ -140,7 +164,7 @@ def main():
                 params={
                     "q": term,
                     "type": "statuses",
-                    "limit": 10
+                    "limit": 20
                 },
                 timeout=30
             )
@@ -148,10 +172,7 @@ def main():
             print("HTTP Status:", response.status_code)
 
             if response.status_code != 200:
-                print(
-                    "Search failed:",
-                    response.text[:300]
-                )
+                print("Search failed:", response.text[:200])
                 continue
 
             statuses = response.json().get(
@@ -166,58 +187,51 @@ def main():
 
                 seen_ids.add(post_id)
 
-                raw_content = status.get(
-                    "content", ""
-                )
-
-                score, reasons = score_post(
-                    raw_content
-                )
-
-                if score < 5:
-                    continue
+                raw_content = status.get("content", "")
+                classification = classify_post(raw_content)
 
                 account = status.get("account", {})
 
-                candidates.append({
+                results.append({
                     "id": post_id,
-                    "user": account.get(
-                        "acct", "Unknown"
-                    ),
+                    "user": account.get("acct", "Unknown"),
                     "url": status.get("url", ""),
-                    "text": clean_text(raw_content),
-                    "score": score,
-                    "reasons": reasons
+                    **classification
                 })
 
         except requests.RequestException as error:
-            print(
-                "Network error:",
-                str(error)
-            )
+            print("Network error:", str(error))
 
-    print("\n========== FILTER RESULTS ==========")
+    categories = {}
+
+    for post in results:
+        category = post["category"]
+        categories[category] = categories.get(category, 0) + 1
+
+    print("\n========== DIAGNOSTIC SUMMARY ==========")
     print("Unique posts checked:", len(seen_ids))
-    print(
-        "Potential conversations:",
-        len(candidates)
-    )
 
-    for index, post in enumerate(candidates, 1):
-        print(f"\nCandidate {index}")
+    for category, count in sorted(categories.items()):
+        print(f"{category}: {count}")
+
+    print("\n========== ALL CLASSIFIED POSTS ==========")
+
+    for index, post in enumerate(results, 1):
+        print(f"\nPost {index}")
+        print("Category:", post["category"])
         print("Score:", post["score"])
-        print(
-            "Reasons:",
-            ", ".join(post["reasons"])
-        )
+        print("Topics:", ", ".join(post["topics"]))
+        print("Help phrases:", ", ".join(post["help"]))
+        print("Problem phrases:", ", ".join(post["problems"]))
+        print("Promo phrases:", ", ".join(post["promo"]))
         print("User:", post["user"])
         print("URL:", post["url"])
-        print("Text:", post["text"][:400])
+        print("Text:", post["text"][:350])
 
-    print(
-        "\nTest completed. No replies were published."
-    )
+    print("\nDiagnostic test completed.")
+    print("No replies were published.")
 
 
 if __name__ == "__main__":
     main()
+    
