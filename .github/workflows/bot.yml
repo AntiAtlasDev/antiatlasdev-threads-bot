@@ -1,4 +1,3 @@
-
 name: Threads Bot
 
 on:
@@ -12,7 +11,6 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,4 +28,5 @@ jobs:
       - name: Run bot
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
         run: python bot.py
