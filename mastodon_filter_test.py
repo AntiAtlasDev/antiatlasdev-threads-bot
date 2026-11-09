@@ -27,20 +27,6 @@ TOPICS = [
     "android apps", "mobile app", "mobile apps"
 ]
 
-HELP_PHRASES = [
-    "need help", "please help", "can someone help",
-    "could someone help", "how do i", "how can i",
-    "how to", "anyone know", "does anyone know",
-    "looking for", "can anyone recommend",
-    "any recommendations", "what is the best",
-    "which app", "any alternative", "any solution",
-    "not working", "doesn't work", "does not work",
-    "having trouble", "having problems",
-    "cannot connect", "can't connect",
-    "connection problem", "problem with",
-    "issue with", "is there a way"
-]
-
 PROMO_PHRASES = [
     "sponsored", "affiliate link", "promo code",
     "buy now", "limited offer", "giveaway",
@@ -48,7 +34,34 @@ PROMO_PHRASES = [
     "introducing our", "meet our new",
     "download now", "available now",
     "check out our", "get started today",
-    "features include", "lets you:"
+    "features include", "launching our"
+]
+
+HELP_PHRASES = [
+    "need help", "please help",
+    "can someone help", "could someone help",
+    "how do i", "how can i",
+    "how do i fix", "how can i fix",
+    "anyone know", "does anyone know",
+    "can anyone recommend",
+    "any recommendations",
+    "which app", "any alternative",
+    "any solution", "is there a way",
+    "is it possible", "why does",
+    "why is", "looking for help",
+    "has anyone experienced"
+]
+
+PROBLEM_PHRASES = [
+    "not working", "doesn't work",
+    "does not work", "can't connect",
+    "cannot connect", "unable to connect",
+    "connection problem", "connection issue",
+    "having trouble", "having problems",
+    "keeps crashing", "app crashes",
+    "error when", "failed to connect",
+    "doesn't connect", "stopped working",
+    "broken after", "getting an error"
 ]
 
 
@@ -72,31 +85,35 @@ def score_post(content):
     if not matched_topics:
         return 0, ["No relevant technical topic"]
 
-    score = 2
-    reasons = ["Relevant topic: " + ", ".join(matched_topics[:3])]
+    has_help = any(
+        phrase in text for phrase in HELP_PHRASES
+    )
 
-    matched_help = [
-        phrase for phrase in HELP_PHRASES
-        if phrase in text
+    has_problem = any(
+        phrase in text for phrase in PROBLEM_PHRASES
+    )
+
+    if not has_help and not has_problem:
+        return 0, [
+            "No clear help request or technical problem"
+        ]
+
+    score = 5
+    reasons = [
+        "Relevant topic: " + ", ".join(matched_topics[:3])
     ]
 
-    if matched_help:
-        score += 3
-        reasons.append("Help request or recommendation")
+    if has_help:
+        score += 2
+        reasons.append("Explicit help request")
+
+    if has_problem:
+        score += 2
+        reasons.append("Specific technical problem")
 
     if "?" in text:
-        score += 2
+        score += 1
         reasons.append("Contains a question")
-
-    problem_words = [
-        "error", "failed", "failure", "bug",
-        "problem", "issue", "broken", "crash",
-        "cannot", "can't", "unable"
-    ]
-
-    if any(word in text for word in problem_words):
-        score += 2
-        reasons.append("Technical problem detected")
 
     return score, reasons
 
@@ -131,10 +148,17 @@ def main():
             print("HTTP Status:", response.status_code)
 
             if response.status_code != 200:
-                print("Search failed:", response.text[:300])
+                print(
+                    "Search failed:",
+                    response.text[:300]
+                )
                 continue
 
-            for status in response.json().get("statuses", []):
+            statuses = response.json().get(
+                "statuses", []
+            )
+
+            for status in statuses:
                 post_id = status.get("id")
 
                 if not post_id or post_id in seen_ids:
@@ -142,17 +166,24 @@ def main():
 
                 seen_ids.add(post_id)
 
-                raw_content = status.get("content", "")
-                score, reasons = score_post(raw_content)
+                raw_content = status.get(
+                    "content", ""
+                )
 
-                if score < 4:
+                score, reasons = score_post(
+                    raw_content
+                )
+
+                if score < 5:
                     continue
 
                 account = status.get("account", {})
 
                 candidates.append({
                     "id": post_id,
-                    "user": account.get("acct", "Unknown"),
+                    "user": account.get(
+                        "acct", "Unknown"
+                    ),
                     "url": status.get("url", ""),
                     "text": clean_text(raw_content),
                     "score": score,
@@ -160,21 +191,32 @@ def main():
                 })
 
         except requests.RequestException as error:
-            print("Network error:", str(error))
+            print(
+                "Network error:",
+                str(error)
+            )
 
     print("\n========== FILTER RESULTS ==========")
     print("Unique posts checked:", len(seen_ids))
-    print("Potential conversations:", len(candidates))
+    print(
+        "Potential conversations:",
+        len(candidates)
+    )
 
     for index, post in enumerate(candidates, 1):
         print(f"\nCandidate {index}")
         print("Score:", post["score"])
-        print("Reasons:", ", ".join(post["reasons"]))
+        print(
+            "Reasons:",
+            ", ".join(post["reasons"])
+        )
         print("User:", post["user"])
         print("URL:", post["url"])
         print("Text:", post["text"][:400])
 
-    print("\nTest completed. No replies were published.")
+    print(
+        "\nTest completed. No replies were published."
+    )
 
 
 if __name__ == "__main__":
