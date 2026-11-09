@@ -12,7 +12,6 @@ from atproto import Client
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 
 HISTORY_FILE = "bluesky_used_articles.json"
-# تم تغيير اسم ملف الحالة لتجاوز الملف القديم الذي يسبب الخطأ
 STATE_FILE = "bluesky_daily_state_v2.json"
 
 # الحدود اليومية
@@ -75,7 +74,6 @@ def save_json(filename, data):
 def get_daily_state():
     today = datetime.now(timezone.utc).date().isoformat()
 
-    # تم استخدام .get() لتجنب أي أخطاء إذا كان الملف فارغاً
     state = load_json(STATE_FILE, {
         "date": today,
         "posts_count": 0,
@@ -149,10 +147,13 @@ def process_replies(client, max_replies):
                 
                 reply_text = random.choice(replies)
                 
-                # إنشاء الرد
+                # التصحيح هنا: تمرير parent و root بشكل صريح
                 client.send_post(
                     text=reply_text,
-                    reply_to={'uri': post.uri, 'cid': post.cid}
+                    reply_to={
+                        "parent": {"uri": post.uri, "cid": post.cid},
+                        "root": {"uri": post.uri, "cid": post.cid}
+                    }
                 )
                 
                 print(f"Replied to @{post.author.handle}")
