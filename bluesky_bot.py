@@ -1,7 +1,8 @@
-
 import os
 import json
 import subprocess
+import time
+import random
 from datetime import datetime, timezone
 
 import requests
@@ -13,8 +14,18 @@ RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "bluesky_used_articles.json"
 STATE_FILE = "bluesky_daily_state.json"
 
-DAILY_LIMIT = 10
+# الحدود اليومية
+DAILY_LIMIT_POSTS = 5
+DAILY_LIMIT_REPLIES = 3
 
+# كلمات البحث للردود
+SEARCH_QUERIES = [
+    "VPN recommendation",
+    "Android networking tools",
+    "DNS not working",
+    "WireGuard help",
+    "looking for a VPN"
+]
 
 def get_articles():
     try:
@@ -45,7 +56,6 @@ def get_articles():
         print("RSS error:", error)
         return []
 
-
 def load_json(filename, default):
     if not os.path.exists(filename):
         return default
@@ -57,28 +67,27 @@ def load_json(filename, default):
         print("Could not read:", filename)
         return default
 
-
 def save_json(filename, data):
     with open(filename, "w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
-
 
 def get_daily_state():
     today = datetime.now(timezone.utc).date().isoformat()
 
     state = load_json(STATE_FILE, {
         "date": today,
-        "count": 0
+        "posts_count": 0,
+        "replies_count": 0
     })
 
     if state.get("date") != today:
         state = {
             "date": today,
-            "count": 0
+            "posts_count": 0,
+            "replies_count": 0
         }
 
     return state
-
 
 def select_article(articles, history):
     for article in articles:
@@ -88,8 +97,7 @@ def select_article(articles, history):
     print("All articles have already been used.")
     return None
 
-
-def publish_to_bluesky(text):
+def login_bluesky():
     handle = os.environ.get("BLUESKY_HANDLE")
     password = os.environ.get("BLUESKY_APP_PASSWORD")
 
@@ -98,101 +106,116 @@ def publish_to_bluesky(text):
 
     client = Client()
     client.login(handle, password)
+    return client
 
+def process_replies(client):
+    print("--- Processing Replies ---")
+    replies_made = 0
+    
+    for query in SEARCH_QUERIES:
+        if replies_made >= DAILY_LIMIT_REPLIES:
+            break
+            
+        try:
+            # البحث عن المنشورات
+            search_results = client.app.bsky.feed.search_posts({'q': query, 'limit': 5})
+            
+            if not search_results or not search_results.posts:
+                continue
+                
+            for post in search_results.posts:
+                # تجنب الرد على النفس
+                if post.author.did == client.me.did:
+                    continue
+                    
+                # تجنب الرد إذا كان منشوراً قديماً (أكثر من 24 ساعة)
+                created_at = datetime.fromisoformat(post.record.created_at.replace('Z', '+00:00'))
+                if (datetime.now(timezone.utc) - created_at).days >= 1:
+                    continue
+
+                # نصوص الردود
+                replies = [
+                    "If you're looking for Android network tools, I develop independent apps for VPNs, DNS, and network diagnostics. Check them out here: https://antiatlasdev-apps.blogspot.com/",
+                    "As an Android dev, I build utilities for networking and security. You might find something useful here: https://antiatlasdev-apps.blogspot.com/"
+                ]
+                
+                reply_text = random.choice(replies)
+                
+                # إنشاء الرد
+                client.send_post(
+                    text=reply_text,
+                    reply_to={'uri': post.uri, 'cid': post.cid}
+                )
+                
+                print(f"Replied to @{post.author.handle}")
+                replies_made += 1
+                time.sleep(15) # انتظار بين الردود
+                
+                if replies_made >= DAILY_LIMIT_REPLIES:
+                    break
+                    
+        except Exception as e:
+            print(f"Search error for '{query}': {e}")
+
+    return replies_made
+
+def publish_to_bluesky(client, text):
     response = client.send_post(text=text)
-
     if not response:
         raise RuntimeError("Bluesky publication failed.")
-
     print("Published successfully.")
-    print("Post URI:", response.uri)
-
+    return response
 
 def commit_history():
     try:
-        subprocess.run(
-            ["git", "config", "user.name", "AntiAtlasDev Bot"],
-            check=True
-        )
-        subprocess.run(
-            ["git", "config", "user.email", "bot@antiatlasdev.com"],
-            check=True
-        )
+        subprocess.run(["git", "config", "user.name", "AntiAtlasDev Bot"], check=True)
+        subprocess.run(["git", "config", "user.email", "bot@antiatlasdev.com"], check=True)
+        subprocess.run(["git", "add", HISTORY_FILE, STATE_FILE], check=True)
 
-        subprocess.run(
-            ["git", "add", HISTORY_FILE, STATE_FILE],
-            check=True
-        )
-
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"]
-        )
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
 
         if result.returncode == 1:
-            subprocess.run(
-                ["git", "commit", "-m", "Update Bluesky publishing history"],
-                check=True
-            )
-            subprocess.run(
-                ["git", "push"],
-                check=True
-            )
+            subprocess.run(["git", "commit", "-m", "Update Bluesky history"], check=True)
+            subprocess.run(["git", "push"], check=True)
             print("Bluesky history saved.")
-
-        elif result.returncode == 0:
-            print("No history changes.")
-
-        else:
-            raise RuntimeError("Git diff failed.")
-
     except Exception as error:
         print("History save error:", error)
         raise
 
-
 if __name__ == "__main__":
-    print("AntiAtlasDev Bluesky Bot")
-
+    print("AntiAtlasDev Bluesky Bot - Posts & Replies")
+    
     state = get_daily_state()
-    print("Today's publications:", state["count"], "/", DAILY_LIMIT)
+    print(f"Today's posts: {state['posts_count']}/{DAILY_LIMIT_POSTS}")
+    print(f"Today's replies: {state['replies_count']}/{DAILY_LIMIT_REPLIES}")
 
-    if state["count"] >= DAILY_LIMIT:
-        print("Daily limit reached. Stopping.")
-        raise SystemExit(0)
+    client = login_bluesky()
 
-    articles = get_articles()
+    # 1. معالجة الردود أولاً (إذا لم نصل للحد الأقصى)
+    if state["replies_count"] < DAILY_LIMIT_REPLIES:
+        remaining_replies = DAILY_LIMIT_REPLIES - state["replies_count"]
+        new_replies = process_replies(client, remaining_replies)
+        state["replies_count"] += new_replies
 
-    if not articles:
-        raise SystemExit("No articles available.")
+    # 2. نشر مقال جديد (إذا لم نصل للحد الأقصى)
+    if state["posts_count"] < DAILY_LIMIT_POSTS:
+        articles = get_articles()
+        history = load_json(HISTORY_FILE, [])
+        article = select_article(articles, history)
 
-    history = load_json(HISTORY_FILE, [])
-    article = select_article(articles, history)
+        if article:
+            post_text = (
+                f"Discover {article['title']} from AntiAtlasDev! 📱\n\n"
+                f"Read more:\n{article['link']}\n\n"
+                f"#Android #AppDevelopment"
+            )
+            publish_to_bluesky(client, post_text)
+            history.append(article["link"])
+            state["posts_count"] += 1
+            save_json(HISTORY_FILE, history)
 
-    if not article:
-        raise SystemExit("No unused articles available.")
-
-    post_text = (
-        f"Discover {article['title']} from AntiAtlasDev!\n\n"
-        f"Read more:\n{article['link']}"
-    )
-
-    print("Selected article:", article["title"])
-
-    # Publish first. Update history only after successful publication.
-    publish_to_bluesky(post_text)
-
-    history.append(article["link"])
-    state["count"] += 1
-
-    save_json(HISTORY_FILE, history)
+    # حفظ الحالة النهائية
     save_json(STATE_FILE, state)
-
     commit_history()
 
-    print(
-        "Daily publications:",
-        state["count"],
-        "/",
-        DAILY_LIMIT
-)
-  
+    print(f"Finished. Posts: {state['posts_count']}, Replies: {state['replies_count']}")
