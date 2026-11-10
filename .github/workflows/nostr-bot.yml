@@ -1,0 +1,28 @@
+name: Nostr Bot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *' # كل 6 ساعات
+permissions:
+  contents: write
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests nostr-sdk
+      - name: Run bot
+        run: python nostr_bot.py
+        env:
+          NOSTR_PRIVATE_KEY: ${{ secrets.NOSTR_PRIVATE_KEY }}
+      - name: Commit history
+        run: |
+          git config user.name "Bot"
+          git config user.email "bot@example.com"
+          git add nostr_used_articles.json || true
+          git commit -m "Update history" || echo "No changes"
+          git push || echo "No changes to push"
