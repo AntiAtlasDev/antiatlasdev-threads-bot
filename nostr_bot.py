@@ -1,9 +1,9 @@
 import os
 import json
 import subprocess
+import asyncio
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
 from nostr_sdk import Keys, Client, EventBuilder
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
@@ -36,34 +36,34 @@ def load_history():
 def save_history(history):
     with open(HISTORY_FILE, "w") as f: json.dump(history, f, indent=2)
 
-def publish_to_nostr(article):
+async def publish_to_nostr(article):
     if not PRIVATE_KEY_HEX:
         raise RuntimeError("NOSTR_PRIVATE_KEY is missing.")
 
-    # إعداد المفاتيح
+    # إعداد المفاتيح والعميل
     keys = Keys.parse(PRIVATE_KEY_HEX)
+    client = Client(keys)
 
-    # إعداد العميل
-    client = Client()
+    # إضافة خوادم الترحيل (Relays) - لاحظ استخدام await
+    await client.add_relay("wss://relay.damus.io")
+    await client.add_relay("wss://nos.lol")
+    await client.add_relay("wss://relay.primal.net")
+    await client.connect()
 
-    # إضافة خوادم الترحيل (Relays) للاتصال بالشبكة
-    client.add_relay("wss://relay.damus.io")
-    client.add_relay("wss://nos.lol")
-    client.add_relay("wss://relay.primal.net")
-    client.connect()
-
-    # تجهيز محتوى المنشور
+    # تجهيز محتوى المنشور (استخدام text_note بدلاً من new_text_note)
     post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
     
-    # إنشاء الحدث وتوقيعه باستخدام المفاتيح مباشرة
+    # إنشاء الحدث (EventBuilder.text_note موجودة في الإصدارات الحديثة) [citation:1]
     builder = EventBuilder.text_note(post_text)
-    event = builder.sign_with_keys(keys)
-
+    
+    # توقيع الحدث وإرساله (لاحظ await)
+    event = builder.to_event(keys)
+    
     print("Publishing to Nostr relays...")
-    output = client.send_event(event)
+    output = await client.send_event(event)
     
     print(f"✅ Published successfully on Nostr! Event ID: {output.id().to_hex()}")
-    client.disconnect()
+    await client.disconnect()
     return True
 
 def commit_history():
@@ -78,7 +78,7 @@ def commit_history():
     except Exception as e:
         print("Git error:", e)
 
-if __name__ == "__main__":
+async def main():
     print("AntiAtlasDev Nostr Bot")
     
     articles = get_articles()
@@ -89,9 +89,14 @@ if __name__ == "__main__":
     
     if article:
         print("Selected:", article["title"])
-        if publish_to_nostr(article):
+        # تشغيل دالة النشر غير المتزامنة
+        if await publish_to_nostr(article):
             history.append(article["link"])
             save_history(history)
             commit_history()
     else:
         print("No new articles to publish.")
+
+if __name__ == "__main__":
+    # تشغيل البرنامج باستخدام asyncio
+    asyncio.run(main())
