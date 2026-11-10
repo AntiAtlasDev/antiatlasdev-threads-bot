@@ -5,15 +5,13 @@ import requests
 import xml.etree.ElementTree as ET
 import re
 from html import unescape
+from datetime import datetime, timezone  # <-- تمت إضافة هذا السطر
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "paperwf_used_articles.json"
 
-# المتغيرات التي سيتم جلبها من GitHub Secrets
 ACCESS_TOKEN = os.environ.get("PAPERWF_ACCESS_TOKEN")
-# اسم المستخدم الخاص بك على Paper.wf (بدون @)
 ALIAS = os.environ.get("PAPERWF_ALIAS", "antiatlaasdev") 
-# رابط مدونتك الرئيسية
 HOMEPAGE_URL = "https://antiatlasdev-apps.blogspot.com/"
 
 def get_articles():
@@ -48,10 +46,10 @@ def publish_to_paperwf(article):
     if not ACCESS_TOKEN:
         raise RuntimeError("PAPERWF_ACCESS_TOKEN is missing.")
 
-    # محتوى المقال بصيغة Markdown
     content = f"{article['desc']}\n\n[Read the full article on AntiAtlasDev]({HOMEPAGE_URL})"
 
-    url = "https://paper.wf/api/collections/" + ALIAS + "/posts"
+    # المسار الصحيح لـ API الخاص بـ WriteFreely
+    url = f"https://paper.wf/api/collections/{ALIAS}/posts"
     
     payload = {
         "title": article["title"],
