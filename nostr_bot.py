@@ -40,25 +40,20 @@ def save_history(history):
     with open(HISTORY_FILE, "w") as f: json.dump(history, f, indent=2)
 
 def create_signed_event(content, private_key_hex):
-    # 1. الحصول على المفتاح العام
     sk = PrivateKey(bytes.fromhex(private_key_hex))
-    pubkey_hex = sk.pubkey.serialize()[1:].hex() # إزالة بادئة 02/03
+    pubkey_hex = sk.pubkey.serialize()[1:].hex()
 
-    # 2. بناء الحدث
     created_at = int(time.time())
     kind = 1
     tags = []
     
-    # 3. حساب الـ ID
     event_data = [0, pubkey_hex, created_at, kind, tags, content]
     serialized = json.dumps(event_data, separators=(',', ':'), ensure_ascii=False)
     event_id = hashlib.sha256(serialized.encode()).hexdigest()
 
-    # 4. توقيع الحدث باستخدام Schnorr
     sig = sk.schnorr_sign(bytes.fromhex(event_id), None, raw=True)
     sig_hex = sig.hex()
 
-    # 5. إرجاع الحدث بصيغة JSON
     return {
         "id": event_id,
         "pubkey": pubkey_hex,
@@ -75,10 +70,8 @@ async def publish_to_nostr(article):
 
     post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
     
-    # 1. إنشاء الحدث الموقع يدوياً
     event_json = create_signed_event(post_text, PRIVATE_KEY_HEX)
     
-    # 2. إعداد العميل
     client = Client()
     await client.add_relay(RelayUrl.parse("wss://relay.damus.io"))
     await client.add_relay(RelayUrl.parse("wss://nos.lol"))
@@ -87,11 +80,11 @@ async def publish_to_nostr(article):
 
     print("Publishing to Nostr relays...")
     
-    # 3. تحويل الـ JSON إلى كائن Event وإرساله
     event = Event.from_json(json.dumps(event_json))
     output = await client.send_event(event)
     
-    print(f"✅ Published successfully on Nostr! Event ID: {output.id().to_hex()}")
+    # تم التصحيح هنا: إزالة الأقواس من id
+    print(f"✅ Published successfully on Nostr! Event ID: {output.id.to_hex()}")
     await client.disconnect()
     return True
 
