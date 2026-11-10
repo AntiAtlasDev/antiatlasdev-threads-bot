@@ -3,10 +3,8 @@ import json
 import subprocess
 import requests
 import xml.etree.ElementTree as ET
-import re
-from html import unescape
 from datetime import datetime, timezone
-from nostr_sdk import Keys, Client, EventBuilder, NostrSigner
+from nostr_sdk import Keys, Client, EventBuilder
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "nostr_used_articles.json"
@@ -42,10 +40,11 @@ def publish_to_nostr(article):
     if not PRIVATE_KEY_HEX:
         raise RuntimeError("NOSTR_PRIVATE_KEY is missing.")
 
-    # إعداد العميل والمفاتيح
+    # إعداد المفاتيح
     keys = Keys.parse(PRIVATE_KEY_HEX)
-    signer = NostrSigner.keys(keys)
-    client = Client(signer)
+
+    # إعداد العميل
+    client = Client()
 
     # إضافة خوادم الترحيل (Relays) للاتصال بالشبكة
     client.add_relay("wss://relay.damus.io")
@@ -55,10 +54,13 @@ def publish_to_nostr(article):
 
     # تجهيز محتوى المنشور
     post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
+    
+    # إنشاء الحدث وتوقيعه باستخدام المفاتيح مباشرة
     builder = EventBuilder.text_note(post_text)
+    event = builder.sign_with_keys(keys)
 
     print("Publishing to Nostr relays...")
-    output = client.send_event_builder(builder)
+    output = client.send_event(event)
     
     print(f"✅ Published successfully on Nostr! Event ID: {output.id().to_hex()}")
     client.disconnect()
