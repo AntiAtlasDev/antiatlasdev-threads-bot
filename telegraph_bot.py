@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "telegraph_used_articles.json"
 ACCESS_TOKEN = os.environ.get("TELEGRAPH_ACCESS_TOKEN")
+HOMEPAGE_URL = "https://antiatlasdev-apps.blogspot.com/"
 
 def get_articles():
     try:
@@ -38,8 +39,12 @@ def publish_to_telegraph(article):
     if not ACCESS_TOKEN:
         raise RuntimeError("TELEGRAPH_ACCESS_TOKEN is missing.")
 
-    # محتوى بسيط جداً لتجنب خطأ CONTENT_FORMAT_INVALID
-    content = f'<p>Discover this app on AntiAtlasDev:</p><p><a href="{article["link"]}">Read the full article here</a></p>'
+    # محتوى نصي بسيط مع رابط الصفحة الرئيسية
+    content = (
+        f"<p>Discover {article['title']} from AntiAtlasDev.</p>"
+        f"<p>Visit our main website for more apps and articles:</p>"
+        f"<p><a href=\"{HOMEPAGE_URL}\">AntiAtlasDev Homepage</a></p>"
+    )
 
     response = requests.post(
         "https://api.telegra.ph/createPage",
