@@ -2,7 +2,7 @@ name: Nostr Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # كل 6 ساعات
+    - cron: '0 */6 * * *'
 permissions:
   contents: write
 jobs:
@@ -10,15 +10,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecp256k1-dev pkg-config
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install requests nostr-sdk
+          
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+        
       - name: Run bot
         run: python nostr_bot.py
         env:
           NOSTR_PRIVATE_KEY: ${{ secrets.NOSTR_PRIVATE_KEY }}
+          
       - name: Commit history
         run: |
           git config user.name "Bot"
