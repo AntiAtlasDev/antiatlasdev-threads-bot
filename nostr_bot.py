@@ -6,9 +6,7 @@ import time
 import hashlib
 import requests
 import xml.etree.ElementTree as ET
-from nostr_sdk import Keys, Client, RelayUrl
-
-# مكتبات التوقيع اليدوي
+from nostr_sdk import Keys, Client, RelayUrl, Event
 from secp256k1 import PrivateKey
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
@@ -42,11 +40,11 @@ def save_history(history):
     with open(HISTORY_FILE, "w") as f: json.dump(history, f, indent=2)
 
 def create_signed_event(content, private_key_hex):
-    # 1. الحصول على المفتاح العام من المفتاح الخاص
+    # 1. الحصول على المفتاح العام
     sk = PrivateKey(bytes.fromhex(private_key_hex))
     pubkey_hex = sk.pubkey.serialize()[1:].hex() # إزالة بادئة 02/03
 
-    # 2. بناء الحدث (Event) يدوياً
+    # 2. بناء الحدث
     created_at = int(time.time())
     kind = 1
     tags = []
@@ -56,7 +54,7 @@ def create_signed_event(content, private_key_hex):
     serialized = json.dumps(event_data, separators=(',', ':'), ensure_ascii=False)
     event_id = hashlib.sha256(serialized.encode()).hexdigest()
 
-    # 4. توقيع الحدث
+    # 4. توقيع الحدث باستخدام Schnorr
     sig = sk.schnorr_sign(bytes.fromhex(event_id), None, raw=True)
     sig_hex = sig.hex()
 
@@ -75,13 +73,12 @@ async def publish_to_nostr(article):
     if not PRIVATE_KEY_HEX:
         raise RuntimeError("NOSTR_PRIVATE_KEY is missing.")
 
-    # 1. إنشاء المحتوى
     post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
     
-    # 2. إنشاء الحدث الموقع يدوياً
+    # 1. إنشاء الحدث الموقع يدوياً
     event_json = create_signed_event(post_text, PRIVATE_KEY_HEX)
     
-    # 3. إعداد العميل وإرسال الحدث
+    # 2. إعداد العميل
     client = Client()
     await client.add_relay(RelayUrl.parse("wss://relay.damus.io"))
     await client.add_relay(RelayUrl.parse("wss://nos.lol"))
@@ -90,11 +87,8 @@ async def publish_to_nostr(article):
 
     print("Publishing to Nostr relays...")
     
-    # إرسال الحدث (نستخدم Event.from_json إذا كانت متوفرة، أو نرسل الـ JSON مباشرة)
-    # في الإصدارات الحديثة، يمكننا تحويل الـ dict إلى Event
-    from nostr_sdk import Event
+    # 3. تحويل الـ JSON إلى كائن Event وإرساله
     event = Event.from_json(json.dumps(event_json))
-    
     output = await client.send_event(event)
     
     print(f"✅ Published successfully on Nostr! Event ID: {output.id().to_hex()}")
