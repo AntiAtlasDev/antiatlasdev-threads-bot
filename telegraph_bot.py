@@ -3,8 +3,6 @@ import json
 import subprocess
 import requests
 import xml.etree.ElementTree as ET
-import re
-from html import unescape
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "telegraph_used_articles.json"
@@ -19,10 +17,8 @@ def get_articles():
         for item in root.findall("./channel/item"):
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
-            desc_html = item.findtext("description", default="")
-            desc_text = re.sub(r'<[^>]+>', '', unescape(desc_html or ""))
             if title and link:
-                articles.append({"title": title, "link": link, "desc": desc_text[:300]})
+                articles.append({"title": title, "link": link})
         print("Total articles:", len(articles))
         return articles
     except Exception as e:
@@ -42,10 +38,8 @@ def publish_to_telegraph(article):
     if not ACCESS_TOKEN:
         raise RuntimeError("TELEGRAPH_ACCESS_TOKEN is missing.")
 
-    content = f"""
-    <p>{article['desc']}</p>
-    <p><a href="{article['link']}">Read the full article on AntiAtlasDev</a></p>
-    """
+    # محتوى بسيط جداً لتجنب خطأ CONTENT_FORMAT_INVALID
+    content = f'<p>Discover this app on AntiAtlasDev:</p><p><a href="{article["link"]}">Read the full article here</a></p>'
 
     response = requests.post(
         "https://api.telegra.ph/createPage",
