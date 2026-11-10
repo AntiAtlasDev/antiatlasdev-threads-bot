@@ -2,9 +2,14 @@ import os
 import json
 import subprocess
 import asyncio
+import time
+import hashlib
 import requests
 import xml.etree.ElementTree as ET
-from nostr_sdk import Keys, Client, EventBuilder, RelayUrl
+from nostr_sdk import Keys, Client, RelayUrl
+
+# مكتبات التوقيع اليدوي
+from secp256k1 import PrivateKey
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "nostr_used_articles.json"
@@ -36,23 +41,60 @@ def load_history():
 def save_history(history):
     with open(HISTORY_FILE, "w") as f: json.dump(history, f, indent=2)
 
+def create_signed_event(content, private_key_hex):
+    # 1. الحصول على المفتاح العام من المفتاح الخاص
+    sk = PrivateKey(bytes.fromhex(private_key_hex))
+    pubkey_hex = sk.pubkey.serialize()[1:].hex() # إزالة بادئة 02/03
+
+    # 2. بناء الحدث (Event) يدوياً
+    created_at = int(time.time())
+    kind = 1
+    tags = []
+    
+    # 3. حساب الـ ID
+    event_data = [0, pubkey_hex, created_at, kind, tags, content]
+    serialized = json.dumps(event_data, separators=(',', ':'), ensure_ascii=False)
+    event_id = hashlib.sha256(serialized.encode()).hexdigest()
+
+    # 4. توقيع الحدث
+    sig = sk.schnorr_sign(bytes.fromhex(event_id), None, raw=True)
+    sig_hex = sig.hex()
+
+    # 5. إرجاع الحدث بصيغة JSON
+    return {
+        "id": event_id,
+        "pubkey": pubkey_hex,
+        "created_at": created_at,
+        "kind": kind,
+        "tags": tags,
+        "content": content,
+        "sig": sig_hex
+    }
+
 async def publish_to_nostr(article):
     if not PRIVATE_KEY_HEX:
         raise RuntimeError("NOSTR_PRIVATE_KEY is missing.")
 
-    keys = Keys.parse(PRIVATE_KEY_HEX)
+    # 1. إنشاء المحتوى
+    post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
+    
+    # 2. إنشاء الحدث الموقع يدوياً
+    event_json = create_signed_event(post_text, PRIVATE_KEY_HEX)
+    
+    # 3. إعداد العميل وإرسال الحدث
     client = Client()
-
     await client.add_relay(RelayUrl.parse("wss://relay.damus.io"))
     await client.add_relay(RelayUrl.parse("wss://nos.lol"))
     await client.add_relay(RelayUrl.parse("wss://relay.primal.net"))
     await client.connect()
 
-    post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
-    builder = EventBuilder.text_note(post_text)
-    event = builder.sign_with_keys(keys)
-
     print("Publishing to Nostr relays...")
+    
+    # إرسال الحدث (نستخدم Event.from_json إذا كانت متوفرة، أو نرسل الـ JSON مباشرة)
+    # في الإصدارات الحديثة، يمكننا تحويل الـ dict إلى Event
+    from nostr_sdk import Event
+    event = Event.from_json(json.dumps(event_json))
+    
     output = await client.send_event(event)
     
     print(f"✅ Published successfully on Nostr! Event ID: {output.id().to_hex()}")
