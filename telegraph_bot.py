@@ -39,24 +39,23 @@ def publish_to_telegraph(article):
     if not ACCESS_TOKEN:
         raise RuntimeError("TELEGRAPH_ACCESS_TOKEN is missing.")
 
-    # محتوى نصي بسيط مع رابط الصفحة الرئيسية
-    content = (
-        f"<p>Discover {article['title']} from AntiAtlasDev.</p>"
-        f"<p>Visit our main website for more apps and articles:</p>"
-        f"<p><a href=\"{HOMEPAGE_URL}\">AntiAtlasDev Homepage</a></p>"
-    )
+    # استخدام صيغة JSON المطلوبة من Telegraph
+    url = "https://api.telegra.ph/createPage"
+    payload = {
+        "access_token": ACCESS_TOKEN,
+        "title": article["title"],
+        "author_name": "AntiAtlasDev",
+        "content": [
+            {"tag": "p", "children": [f"Discover {article['title']} from AntiAtlasDev."]},
+            {"tag": "p", "children": ["Visit our main website for more apps and articles:"]},
+            {"tag": "p", "children": [{"tag": "a", "attrs": {"href": HOMEPAGE_URL}, "children": ["AntiAtlasDev Homepage"]}]}
+        ],
+        "return_content": True
+    }
 
-    response = requests.post(
-        "https://api.telegra.ph/createPage",
-        data={
-            "access_token": ACCESS_TOKEN,
-            "title": article["title"],
-            "content": content,
-            "author_name": "AntiAtlasDev",
-            "return_content": "true"
-        },
-        timeout=20
-    )
+    headers = {"Content-Type": "application/json"}
+    
+    response = requests.post(url, json=payload, headers=headers, timeout=20)
     
     if response.status_code != 200:
         print(f"HTTP Error: {response.text}")
