@@ -40,25 +40,25 @@ async def publish_to_nostr(article):
     if not PRIVATE_KEY_HEX:
         raise RuntimeError("NOSTR_PRIVATE_KEY is missing.")
 
-    # إعداد المفاتيح والعميل
+    # 1. إعداد المفاتيح
     keys = Keys.parse(PRIVATE_KEY_HEX)
-    client = Client(keys)
 
-    # إضافة خوادم الترحيل (Relays) - لاحظ استخدام await
+    # 2. إنشاء العميل بدون وسائط (الإصدار الحديث)
+    client = Client()
+
+    # 3. إضافة خوادم الترحيل (Relays)
     await client.add_relay("wss://relay.damus.io")
     await client.add_relay("wss://nos.lol")
     await client.add_relay("wss://relay.primal.net")
     await client.connect()
 
-    # تجهيز محتوى المنشور (استخدام text_note بدلاً من new_text_note)
+    # 4. تجهيز محتوى المنشور
     post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
     
-    # إنشاء الحدث (EventBuilder.text_note موجودة في الإصدارات الحديثة) [citation:1]
+    # 5. إنشاء الحدث وتوقيعه
     builder = EventBuilder.text_note(post_text)
-    
-    # توقيع الحدث وإرساله (لاحظ await)
-    event = builder.to_event(keys)
-    
+    event = builder.sign_with_keys(keys)
+
     print("Publishing to Nostr relays...")
     output = await client.send_event(event)
     
@@ -89,7 +89,6 @@ async def main():
     
     if article:
         print("Selected:", article["title"])
-        # تشغيل دالة النشر غير المتزامنة
         if await publish_to_nostr(article):
             history.append(article["link"])
             save_history(history)
@@ -98,5 +97,4 @@ async def main():
         print("No new articles to publish.")
 
 if __name__ == "__main__":
-    # تشغيل البرنامج باستخدام asyncio
     asyncio.run(main())
