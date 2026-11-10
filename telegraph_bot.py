@@ -3,6 +3,8 @@ import json
 import subprocess
 import requests
 import xml.etree.ElementTree as ET
+import re
+from html import unescape
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "telegraph_used_articles.json"
@@ -18,8 +20,14 @@ def get_articles():
         for item in root.findall("./channel/item"):
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
+            desc_html = item.findtext("description", default="")
+            
+            # تنظيف الوصف من وسوم HTML
+            desc_text = re.sub(r'<[^>]+>', '', unescape(desc_html or ""))
+            desc_text = " ".join(desc_text.split())[:200] # أول 200 حرف
+            
             if title and link:
-                articles.append({"title": title, "link": link})
+                articles.append({"title": title, "link": link, "desc": desc_text})
         print("Total articles:", len(articles))
         return articles
     except Exception as e:
@@ -39,23 +47,24 @@ def publish_to_telegraph(article):
     if not ACCESS_TOKEN:
         raise RuntimeError("TELEGRAPH_ACCESS_TOKEN is missing.")
 
-    # استخدام صيغة JSON المطلوبة من Telegraph
-    url = "https://api.telegra.ph/createPage"
+    # بناء محتوى الصفحة (وصف + رابط)
+    content = [
+        {"tag": "p", "children": [article["desc"] + "..."]},
+        {"tag": "p", "children": ["Read the full article on AntiAtlasDev:"]},
+        {"tag": "p", "children": [{"tag": "a", "attrs": {"href": article["link"]}, "children": ["Read more here"]}]}
+    ]
+
     payload = {
         "access_token": ACCESS_TOKEN,
         "title": article["title"],
         "author_name": "AntiAtlasDev",
-        "content": [
-            {"tag": "p", "children": [f"Discover {article['title']} from AntiAtlasDev."]},
-            {"tag": "p", "children": ["Visit our main website for more apps and articles:"]},
-            {"tag": "p", "children": [{"tag": "a", "attrs": {"href": HOMEPAGE_URL}, "children": ["AntiAtlasDev Homepage"]}]}
-        ],
+        "content": content,
         "return_content": True
     }
 
     headers = {"Content-Type": "application/json"}
     
-    response = requests.post(url, json=payload, headers=headers, timeout=20)
+    response = requests.post("https://api.telegra.ph/createPage", json=payload, headers=headers, timeout=20)
     
     if response.status_code != 200:
         print(f"HTTP Error: {response.text}")
