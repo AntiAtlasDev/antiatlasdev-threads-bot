@@ -4,7 +4,7 @@ import subprocess
 import asyncio
 import requests
 import xml.etree.ElementTree as ET
-from nostr_sdk import Keys, Client, EventBuilder
+from nostr_sdk import Keys, Client, EventBuilder, RelayUrl
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "nostr_used_articles.json"
@@ -40,22 +40,15 @@ async def publish_to_nostr(article):
     if not PRIVATE_KEY_HEX:
         raise RuntimeError("NOSTR_PRIVATE_KEY is missing.")
 
-    # 1. إعداد المفاتيح
     keys = Keys.parse(PRIVATE_KEY_HEX)
-
-    # 2. إنشاء العميل بدون وسائط (الإصدار الحديث)
     client = Client()
 
-    # 3. إضافة خوادم الترحيل (Relays)
-    await client.add_relay("wss://relay.damus.io")
-    await client.add_relay("wss://nos.lol")
-    await client.add_relay("wss://relay.primal.net")
+    await client.add_relay(RelayUrl.parse("wss://relay.damus.io"))
+    await client.add_relay(RelayUrl.parse("wss://nos.lol"))
+    await client.add_relay(RelayUrl.parse("wss://relay.primal.net"))
     await client.connect()
 
-    # 4. تجهيز محتوى المنشور
     post_text = f"Discover {article['title']} from AntiAtlasDev! 📱\n\nRead more:\n{article['link']}\n\n#Android #AppDevelopment"
-    
-    # 5. إنشاء الحدث وتوقيعه
     builder = EventBuilder.text_note(post_text)
     event = builder.sign_with_keys(keys)
 
