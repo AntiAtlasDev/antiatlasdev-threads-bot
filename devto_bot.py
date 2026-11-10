@@ -15,9 +15,7 @@ API_URL = "https://dev.to/api/articles"
 HISTORY_FILE = "devto_used_articles.json"
 STATE_FILE = "devto_daily_state.json"
 
-# نشر مقال واحد يومياً هو الخيار الأفضل والأكثر أماناً في Dev.to
 DAILY_LIMIT = 1
-
 
 class TextExtractor(HTMLParser):
     def __init__(self):
@@ -27,12 +25,10 @@ class TextExtractor(HTMLParser):
     def handle_data(self, data):
         self.parts.append(data)
 
-
 def clean_description(value):
     parser = TextExtractor()
     parser.feed(unescape(value or ""))
     return " ".join(" ".join(parser.parts).split())[:450]
-
 
 def get_articles():
     response = requests.get(RSS_URL, timeout=30)
@@ -58,7 +54,6 @@ def get_articles():
     print("Total articles:", len(articles))
     return articles
 
-
 def load_json(filename, default):
     if not os.path.exists(filename):
         return default
@@ -69,11 +64,9 @@ def load_json(filename, default):
     except Exception:
         return default
 
-
 def save_json(filename, data):
     with open(filename, "w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
-
 
 def publish(article):
     api_key = os.environ.get("DEVTO_API_KEY")
@@ -85,7 +78,6 @@ def publish(article):
         "Discover this Android app and development article from AntiAtlasDev."
     )
 
-    # إضافة مقدمة تقنية قصيرة لتجنب اعتبار المقال "محتوى غير مكتمل"
     intros = [
         "In this article, we explore a practical Android development topic. ",
         "Android development is constantly evolving. Here is a quick look at a useful tool. ",
@@ -111,8 +103,8 @@ def publish(article):
             "published": True,
             "canonical_url": article["link"],
             "description": description[:160],
-            # تحسين الوسوم
-            "tags": ["android", "mobile", "programming", "opensource", "appdev"]
+            # تم التصحيح: 4 وسوم فقط
+            "tags": ["android", "mobile", "programming", "opensource"]
         }
     }
 
@@ -135,37 +127,22 @@ def publish(article):
     result = response.json()
     print("Published successfully:", result.get("url"))
 
-
 def commit_history():
-    subprocess.run(
-        ["git", "config", "user.name", "AntiAtlasDev Bot"],
-        check=True
-    )
-    subprocess.run(
-        ["git", "config", "user.email", "bot@antiatlasdev.com"],
-        check=True
-    )
-    subprocess.run(
-        ["git", "add", HISTORY_FILE, STATE_FILE],
-        check=True
-    )
+    subprocess.run(["git", "config", "user.name", "AntiAtlasDev Bot"], check=True)
+    subprocess.run(["git", "config", "user.email", "bot@antiatlasdev.com"], check=True)
+    subprocess.run(["git", "add", HISTORY_FILE, STATE_FILE], check=True)
 
     result = subprocess.run(["git", "diff", "--cached", "--quiet"])
 
     if result.returncode == 1:
-        subprocess.run(
-            ["git", "commit", "-m", "Update DEV.to history"],
-            check=True
-        )
+        subprocess.run(["git", "commit", "-m", "Update DEV.to history"], check=True)
         subprocess.run(["git", "push"], check=True)
-
 
 if __name__ == "__main__":
     print("AntiAtlasDev DEV.to Bot")
 
     today = datetime.now(timezone.utc).date().isoformat()
 
-    # استخدام .get() لتجنب أخطاء الملفات القديمة
     state = load_json(STATE_FILE, {
         "date": today,
         "count": 0
