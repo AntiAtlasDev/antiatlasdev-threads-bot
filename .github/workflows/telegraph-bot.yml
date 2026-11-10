@@ -21,6 +21,6 @@ jobs:
         run: |
           git config user.name "Bot"
           git config user.email "bot@example.com"
-          git add telegraph_used_articles.json
+          git add telegraph_used_articles.json || true
           git commit -m "Update history" || echo "No changes"
-          git push
+          git push || echo "No changes to push"
