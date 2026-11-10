@@ -1,0 +1,17 @@
+name: Hacker News Bot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * 1' # يعمل كل يوم اثنين الساعة 10 صباحاً (مرة واحدة أسبوعياً)
+
+jobs:
+  post-to-hn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Hacker News
+        uses: higgins/action-hackernews-post@v1.0.1
+        with:
+          HN_USERNAME: ${{ secrets.HN_USERNAME }}
+          HN_PASSWORD: ${{ secrets.HN_PASSWORD }}
+          POST_TITLE: "Show HN: AntiAtlasDev - Open-source Android networking tools"
+          POST_URL: "https://antiatlasdev-apps.blogspot.com/"
