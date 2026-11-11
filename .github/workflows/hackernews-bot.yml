@@ -2,7 +2,7 @@ name: Hacker News Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 10 * * 1' # يعمل كل يوم اثنين الساعة 10 صباحاً (مرة واحدة أسبوعياً)
+    - cron: '0 10 * * *' # يعمل كل يوم الساعة 10 صباحاً
 
 jobs:
   post-to-hn:
