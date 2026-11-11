@@ -5,6 +5,7 @@ import requests
 import xml.etree.ElementTree as ET
 import re
 from html import unescape
+import subprocess
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "telegram_used_articles.json"
@@ -17,15 +18,12 @@ def get_articles():
         response.raise_for_status()
         root = ET.fromstring(response.content)
         articles = []
-        
-        # مساحة الأسماء (Namespace) الخاصة بصور المدونة
         ns = {'media': 'http://search.yahoo.com/mrss/'}
         
         for item in root.findall("./channel/item"):
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
             
-            # جلب الصورة المصغرة من الـ RSS
             image_url = None
             media_thumb = item.find("media:thumbnail", ns)
             if media_thumb is not None:
@@ -33,49 +31,43 @@ def get_articles():
                 
             if title and link:
                 articles.append({"title": title, "link": link, "image": image_url})
-                
-        print("Total articles:", len(articles))
         return articles
     except Exception as e:
         print("RSS error:", e)
         return []
 
 def load_history():
-    if not os.path.exists(HISTORY_FILE): return []
+    if not os.path.exists(HISTORY_FILE): 
+        return []
     try:
-        with open(HISTORY_FILE, "r") as f: return json.load(f)
-    except: return []
+        with open(HISTORY_FILE, "r") as f: 
+            return json.load(f)
+    except: 
+        return []
 
 def save_history(history):
-    with open(HISTORY_FILE, "w") as f: json.dump(history, f, indent=2)
+    try:
+        with open(HISTORY_FILE, "w") as f: 
+            json.dump(history, f, indent=2)
+        print("History file saved locally.")
+    except Exception as e:
+        print(f"Error saving history: {e}")
 
 def send_to_telegram(article, is_recycled=False):
     if not TOKEN or not CHAT_ID:
         raise RuntimeError("Telegram secrets are missing.")
 
-    # صياغة الرسالة
     if is_recycled:
         text = f"🔄 <b>Flashback:</b> {article['title']}\n\nRead more here:\n{article['link']}"
     else:
         text = f"📱 <b>New App:</b> {article['title']}\n\nRead more here:\n{article['link']}"
 
     if article.get("image"):
-        # إرسال صورة مع النص
         url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-        payload = {
-            "chat_id": CHAT_ID,
-            "photo": article["image"],
-            "caption": text,
-            "parse_mode": "HTML"
-        }
+        payload = {"chat_id": CHAT_ID, "photo": article["image"], "caption": text, "parse_mode": "HTML"}
     else:
-        # إرسال نص فقط إذا لم توجد صورة
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML"
-        }
+        payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
 
     try:
         response = requests.post(url, data=payload, timeout=15)
@@ -89,6 +81,20 @@ def send_to_telegram(article, is_recycled=False):
         print(f"Request error: {e}")
         return False
 
+def commit_history():
+    try:
+        subprocess.run(["git", "config", "user.name", "AntiAtlasDev Bot"], check=True)
+        subprocess.run(["git", "config", "user.email", "bot@antiatlasdev.com"], check=True)
+        subprocess.run(["git", "add", HISTORY_FILE], check=True)
+        
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        if result.returncode == 1:
+            subprocess.run(["git", "commit", "-m", "Update Telegram history"], check=True)
+            subprocess.run(["git", "push"], check=True)
+            print("History committed to GitHub.")
+    except Exception as e:
+        print(f"Git error: {e}")
+
 if __name__ == "__main__":
     print("AntiAtlasDev Telegram Bot")
     
@@ -96,19 +102,20 @@ if __name__ == "__main__":
     if not articles: 
         raise SystemExit("No articles found in RSS.")
     
+    # 1. تحميل السجل الحالي
     history = load_history()
     
-    # 1. البحث عن مقال جديد لم ينشر من قبل
+    # 2. البحث عن مقال جديد
     new_article = next((a for a in articles if a["link"] not in history), None)
     
     if new_article:
         print("Found NEW article. Sending...")
         if send_to_telegram(new_article, is_recycled=False):
+            # 3. إضافة الرابط للسجل وحفظه فوراً
             history.append(new_article["link"])
-            save_history(history)
+            save_history(history) 
+            commit_history() # 4. رفع السجل إلى GitHub
     else:
-        # 2. إذا لم يوجد جديد، نختار مقالاً قديماً عشوائياً
         print("No new articles. Recycling an old one...")
         recycled_article = random.choice(articles)
         send_to_telegram(recycled_article, is_recycled=True)
-        # لا نضيفه للسجل لأنه موجود مسبقاً
