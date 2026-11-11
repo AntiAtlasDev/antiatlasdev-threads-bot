@@ -1,10 +1,9 @@
-
 name: Mastodon Filter Test
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */3 * * *' # كل 3 ساعات
 
 jobs:
   filter:
