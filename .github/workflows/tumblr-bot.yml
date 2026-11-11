@@ -3,7 +3,7 @@ name: Tumblr Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # كل 6 ساعات (آمن جداً)
+    - cron: '0 */3 * * *' # كل 6 ساعات (آمن جداً)
 
 jobs:
   reblog:
