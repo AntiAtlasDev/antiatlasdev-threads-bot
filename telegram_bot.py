@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 import re
 from html import unescape
 import subprocess
+import time
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
 HISTORY_FILE = "telegram_used_articles.json"
@@ -31,6 +32,7 @@ def get_articles():
                 
             if title and link:
                 articles.append({"title": title, "link": link, "image": image_url})
+        print("Total articles:", len(articles))
         return articles
     except Exception as e:
         print("RSS error:", e)
@@ -46,12 +48,8 @@ def load_history():
         return []
 
 def save_history(history):
-    try:
-        with open(HISTORY_FILE, "w") as f: 
-            json.dump(history, f, indent=2)
-        print("History file saved locally.")
-    except Exception as e:
-        print(f"Error saving history: {e}")
+    with open(HISTORY_FILE, "w") as f: 
+        json.dump(history, f, indent=2)
 
 def send_to_telegram(article, is_recycled=False):
     if not TOKEN or not CHAT_ID:
@@ -87,11 +85,16 @@ def commit_history():
         subprocess.run(["git", "config", "user.email", "bot@antiatlasdev.com"], check=True)
         subprocess.run(["git", "add", HISTORY_FILE], check=True)
         
+        # سحب التحديثات قبل الرفع لتجنب التعارض
+        subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=False)
+        
         result = subprocess.run(["git", "diff", "--cached", "--quiet"])
         if result.returncode == 1:
             subprocess.run(["git", "commit", "-m", "Update Telegram history"], check=True)
-            subprocess.run(["git", "push"], check=True)
+            subprocess.run(["git", "push", "origin", "main"], check=True)
             print("History committed to GitHub.")
+        else:
+            print("No history changes to commit.")
     except Exception as e:
         print(f"Git error: {e}")
 
@@ -99,22 +102,17 @@ if __name__ == "__main__":
     print("AntiAtlasDev Telegram Bot")
     
     articles = get_articles()
-    if not articles: 
-        raise SystemExit("No articles found in RSS.")
+    if not articles: raise SystemExit("No articles found.")
     
-    # 1. تحميل السجل الحالي
     history = load_history()
-    
-    # 2. البحث عن مقال جديد
     new_article = next((a for a in articles if a["link"] not in history), None)
     
     if new_article:
         print("Found NEW article. Sending...")
         if send_to_telegram(new_article, is_recycled=False):
-            # 3. إضافة الرابط للسجل وحفظه فوراً
             history.append(new_article["link"])
             save_history(history) 
-            commit_history() # 4. رفع السجل إلى GitHub
+            commit_history()
     else:
         print("No new articles. Recycling an old one...")
         recycled_article = random.choice(articles)
