@@ -1,13 +1,10 @@
 name: Threads Bot
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 * * * *'
-
+    - cron: '0 * * * *' # كل ساعة
 permissions:
   contents: write
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -29,4 +26,4 @@ jobs:
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-        run: python bot.py
+        run: python bot.py # تأكد أن اسم ملف البايثون هو bot.py
