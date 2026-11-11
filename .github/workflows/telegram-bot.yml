@@ -1,38 +1,28 @@
-
-name: Telegram Blog Bot
-
+name: Telegram Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'
-
+    - cron: '*/30 * * * *' # كل 30 دقيقة (يمكنك تعديله لاحقاً)
 permissions:
-  contents: write
-
-concurrency:
-  group: telegram-blog-bot
-  cancel-in-progress: false
-
+  contents: write # ضروري جداً لحفظ السجل
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run Telegram bot
+      - run: pip install requests
+      - run: python telegram_bot.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python telegram_bot.py
+      - name: Commit history
+        run: |
+          git config user.name "Bot"
+          git config user.email "bot@example.com"
+          git add telegram_used_articles.json || true
+          git commit -m "Update history" || echo "No changes"
+          git pull --rebase origin main || echo "Pull failed"
+          git push origin main || echo "Push failed"
