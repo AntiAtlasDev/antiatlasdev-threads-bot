@@ -1,25 +1,35 @@
 import os
 import json
-import subprocess
-import requests
-import xml.etree.ElementTree as ET
 import time
 import random
+import requests
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
-HISTORY_FILE = "used_articles.json"
+HISTORY_FILE = "threads_used_articles.json"
+STATE_FILE = "threads_daily_state.json"
 
+# المتغيرات من GitHub Secrets
 ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN")
 USER_ID = os.environ.get("THREADS_USER_ID")
 
-# إعدادات البحث
-SEARCH_QUERIES = ["VPN recommendation", "DNS not working", "Android network tools"]
-MAX_REPLIES_PER_RUN = 1 # الرد على منشور واحد فقط في كل تشغيل (حماية)
+# الإعدادات
+MAX_POSTS_DAILY = 3
+MAX_REPLIES_DAILY = 5
+
+# الكلمات المفتاحية الدقيقة المستخرجة من مقالاتك
+SEARCH_QUERIES = [
+    "VPN recommendation", "VPN not working", "OpenVPN client", "WireGuard VPN",
+    "DNS problem", "DNS Changer", "DNS leak", "Proxy client", "Network tools",
+    "Subdomain finder", "DNSTT", "Mock location", "Fake GPS", "GPS route simulator",
+    "Offline maps", "Image resizer", "Background eraser", "Image converter",
+    "Compress image", "Calorie calculator", "File explorer", "WiFi analyzer"
+]
 
 def get_articles():
     try:
-        response = requests.get(RSS_URL, headers={"User-Agent": "AntiAtlasDevBot/1.0"}, timeout=30)
-        response.raise_for_status()
+        response = requests.get(RSS_URL, timeout=15)
         root = ET.fromstring(response.content)
         articles = []
         for item in root.findall("./channel/item"):
@@ -27,180 +37,143 @@ def get_articles():
             link = item.findtext("link", default="").strip()
             if title and link:
                 articles.append({"title": title, "link": link})
-        print("Total articles:", len(articles))
         return articles
-    except Exception as error:
-        print("RSS error:", error)
+    except Exception as e:
+        print("RSS error:", e)
         return []
 
-def load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return []
+def load_json(filename, default):
+    if not os.path.exists(filename): return default
     try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as file:
-            return json.load(file)
-    except (json.JSONDecodeError, OSError):
-        return []
+        with open(filename, "r") as f: return json.load(f)
+    except: return default
 
-def save_history(history):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as file:
-        json.dump(history, file, ensure_ascii=False, indent=2)
+def save_json(filename, data):
+    with open(filename, "w") as f: json.dump(data, f, indent=2)
 
-def select_article(articles, history):
-    unused = [article for article in articles if article["link"] not in history]
-    if not unused:
-        print("All articles have been used. Starting a new cycle.")
-        history.clear()
-        unused = articles
-    if not unused:
-        return None
-    article = unused[0]
-    history.append(article["link"])
-    return article
+def get_daily_state():
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = load_json(STATE_FILE, {"date": today, "posts_count": 0, "replies_count": 0})
+    if state.get("date") != today:
+        state = {"date": today, "posts_count": 0, "replies_count": 0}
+    return state
 
 def search_and_reply():
     print("--- Processing Replies ---")
-    if not USER_ID:
-        print("THREADS_USER_ID is missing. Cannot search.")
-        return 0
-
     replies_made = 0
+    
+    # خلط الكلمات المفتاحية لاختيار كلمة عشوائية في كل مرة
+    random.shuffle(SEARCH_QUERIES)
+    
     for query in SEARCH_QUERIES:
-        if replies_made >= MAX_REPLIES_PER_RUN:
+        if replies_made >= 1: # رد واحد فقط في كل تشغيل (لتجنب الحظر)
             break
             
         print(f"Searching for: {query}")
         search_url = "https://graph.threads.net/v1.0/keyword_search"
-        params = {
-            "q": query,
-            "search_type": "RECENT",
-            "access_token": ACCESS_TOKEN
-        }
+        params = {"q": query, "search_type": "RECENT", "access_token": ACCESS_TOKEN}
         
         try:
-            response = requests.get(search_url, params=params, timeout=15)
-            if response.status_code != 200:
-                print(f"Search error ({response.status_code}): {response.text}")
+            res = requests.get(search_url, params=params, timeout=15)
+            if res.status_code != 200:
                 continue
                 
-            data = response.json().get("data", [])
-            if not data:
-                print("No results found.")
-                continue
-
+            data = res.json().get("data", [])
             for post in data:
-                # تجنب الرد على منشوراتنا
-                if post.get("username") == "antiatlasdev": 
-                    continue
+                if post.get("username") == "antiatlasdev": continue # تجنب الرد على النفس
                 
                 post_id = post.get("id")
-                if not post_id:
-                    continue
+                if not post_id: continue
 
+                # نصوص ردود متنوعة (بدون روابط مباشرة لتجنب الحظر)
                 replies = [
-                    "If you're looking for Android network tools, I develop independent apps for VPNs, DNS, and diagnostics. Check them out here: https://antiatlasdev-apps.blogspot.com/",
-                    "As an Android dev, I build utilities for networking and security. You might find something useful here: https://antiatlasdev-apps.blogspot.com/"
+                    "If you're looking for Android network tools, I develop independent apps for VPNs, DNS, and diagnostics. Check my profile!",
+                    "As an Android dev, I build utilities for networking and security. You might find something useful on my page!",
+                    "Thanks for sharing this. I also build Android tools (VPNs, DNS, GPS). Feel free to check my profile for more."
                 ]
                 reply_text = random.choice(replies)
 
+                # إنشاء حاوية الرد
                 create_url = f"https://graph.threads.net/v1.0/{USER_ID}/threads"
-                payload = {
-                    "media_type": "TEXT",
-                    "text": reply_text,
-                    "reply_to_id": post_id,
-                    "access_token": ACCESS_TOKEN
-                }
+                payload = {"media_type": "TEXT", "text": reply_text, "reply_to_id": post_id, "access_token": ACCESS_TOKEN}
                 
-                res = requests.post(create_url, data=payload, timeout=15)
-                if res.status_code != 200:
-                    print(f"Error creating reply container: {res.text}")
+                create_res = requests.post(create_url, data=payload, timeout=15)
+                if create_res.status_code != 200:
                     continue
                     
-                creation_id = res.json().get("id")
-                print(f"Reply container created: {creation_id}")
+                creation_id = create_res.json().get("id")
+                print("Waiting 30 seconds before publishing reply...")
+                time.sleep(30) # الانتظار 30 ثانية قبل النشر
                 
-                # الانتظار 30 ثانية قبل النشر
-                time.sleep(30)
-                
+                # نشر الرد
                 publish_url = f"https://graph.threads.net/v1.0/{USER_ID}/threads_publish"
-                pub_payload = {
-                    "creation_id": creation_id,
-                    "access_token": ACCESS_TOKEN
-                }
-                
+                pub_payload = {"creation_id": creation_id, "access_token": ACCESS_TOKEN}
                 pub_res = requests.post(publish_url, data=pub_payload, timeout=15)
+                
                 if pub_res.status_code == 200:
-                    print(f"✅ Replied to @{post.get('username')} successfully!")
+                    print(f"✅ Replied to @{post.get('username')}")
                     replies_made += 1
-                    break # نكتفي برد واحد لكل استعلام
-                else:
-                    print(f"Error publishing reply: {pub_res.text}")
+                    break # نكتفي برد واحد لكل كلمة بحث
                     
         except Exception as e:
-            print(f"Exception during search/reply: {e}")
+            print(f"Search error: {e}")
 
     return replies_made
 
 def publish_post(text):
-    print("--- Publishing New Article ---")
+    print("Publishing post...")
     url_create = f"https://graph.threads.net/v1.0/{USER_ID}/threads"
-    payload_create = {
-        "media_type": "TEXT",
-        "text": text,
-        "access_token": ACCESS_TOKEN
-    }
-    try:
-        response = requests.post(url_create, data=payload_create, timeout=15)
-        if response.status_code != 200:
-            print(f"Error creating container: {response.text}")
-            return False
-        creation_id = response.json().get("id")
-        print(f"Container created: {creation_id}")
-        print("Waiting 30 seconds...")
-        time.sleep(30)
-        
-        url_publish = f"https://graph.threads.net/v1.0/{USER_ID}/threads_publish"
-        payload_publish = {"creation_id": creation_id, "access_token": ACCESS_TOKEN}
-        response = requests.post(url_publish, data=payload_publish, timeout=15)
-        if response.status_code == 200:
-            print("✅ Published successfully!")
-            return True
-        else:
-            print(f"Error publishing: {response.text}")
-            return False
-    except Exception as e:
-        print(f"Exception during publish: {e}")
+    payload_create = {"media_type": "TEXT", "text": text, "access_token": ACCESS_TOKEN}
+    
+    res = requests.post(url_create, data=payload_create, timeout=15)
+    if res.status_code != 200:
+        print(f"Error creating post: {res.text}")
         return False
-
-def commit_history():
-    try:
-        subprocess.run(["git", "config", "user.name", "AntiAtlasDev Bot"], check=True)
-        subprocess.run(["git", "config", "user.email", "bot@antiatlasdev.com"], check=True)
-        subprocess.run(["git", "add", HISTORY_FILE], check=True)
-        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
-        if result.returncode == 1:
-            subprocess.run(["git", "commit", "-m", "Update history"], check=True)
-            subprocess.run(["git", "push"], check=True)
-            print("History saved.")
-    except Exception as error:
-        print("Git history save error:", error)
+        
+    creation_id = res.json().get("id")
+    time.sleep(30) # الانتظار 30 ثانية
+    
+    url_publish = f"https://graph.threads.net/v1.0/{USER_ID}/threads_publish"
+    pub_payload = {"creation_id": creation_id, "access_token": ACCESS_TOKEN}
+    pub_res = requests.post(url_publish, data=pub_payload, timeout=15)
+    
+    if pub_res.status_code == 200:
+        print("✅ Published post successfully.")
+        return True
+    return False
 
 if __name__ == "__main__":
-    print("AntiAtlasDev Threads Bot - Search, Reply & Publish")
+    print("AntiAtlasDev Threads Bot")
+    state = get_daily_state()
     
-    # 1. محاولة الردود أولاً
-    replies = search_and_reply()
-    
-    # 2. نشر مقال جديد
-    articles = get_articles()
-    if articles:
-        history = load_history()
-        article = select_article(articles, history)
+    # 1. محاولة الردود (إذا لم نصل للحد اليومي)
+    if state["replies_count"] < MAX_REPLIES_DAILY:
+        new_replies = search_and_reply()
+        state["replies_count"] += new_replies
+        save_json(STATE_FILE, state)
+
+    # 2. محاولة النشر (إذا لم نصل للحد اليومي)
+    if state["posts_count"] < MAX_POSTS_DAILY:
+        articles = get_articles()
+        history = load_json(HISTORY_FILE, [])
+        
+        # البحث عن مقال جديد
+        article = next((a for a in articles if a["link"] not in history), None)
+        
         if article:
+            # نشر مقال جديد
             draft = f"Discover {article['title']} from AntiAtlasDev!\n\nRead more:\n{article['link']}"
-            success = publish_post(draft)
-            if success:
-                save_history(history)
-                commit_history()
-    
-    print("\nBot finished.")
+            if publish_post(draft):
+                history.append(article["link"])
+                save_json(HISTORY_FILE, history)
+                state["posts_count"] += 1
+        else:
+            # إعادة نشر مقال قديم (Flashback)
+            print("No new articles. Recycling...")
+            recycled = random.choice(articles)
+            draft = f"🔄 Flashback: {recycled['title']}\n\nRead more:\n{recycled['link']}"
+            if publish_post(draft):
+                state["posts_count"] += 1
+
+    save_json(STATE_FILE, state)
+    print(f"Finished. Posts: {state['posts_count']}, Replies: {state['replies_count']}")
