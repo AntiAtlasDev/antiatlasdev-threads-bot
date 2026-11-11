@@ -2,6 +2,7 @@ import os
 import json
 import time
 import random
+import subprocess
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -13,24 +14,11 @@ STATE_FILE = "threads_daily_state.json"
 ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN")
 USER_ID = os.environ.get("THREADS_USER_ID")
 
-# الحدود اليومية
 MAX_POSTS_DAILY = 3
 MAX_REPLIES_DAILY = 5
 
-# قائمة الكلمات المفتاحية الموسعة
-SEARCH_QUERIES = [
-    # كلمات دقيقة من مقالاتك
-    "VPN recommendation", "VPN not working", "OpenVPN client", "WireGuard VPN",
-    "DNS problem", "DNS Changer", "DNS leak", "Proxy client", "Network tools",
-    "Subdomain finder", "DNSTT", "Mock location", "Fake GPS", "GPS route simulator",
-    "Offline maps", "Image resizer", "Background eraser", "Image converter",
-    "Compress image", "Calorie calculator", "File explorer", "WiFi analyzer",
-    
-    # كلمات أوسع لزيادة فرص البحث
-    "VPN", "Android VPN", "DNS", "Fake GPS", "Location spoofer", 
-    "Image editor", "Photo resizer", "Network utility", "Android dev", 
-    "Privacy tools", "Proxy", "WireGuard"
-]
+# كلمات البحث للردود
+SEARCH_QUERIES = ["VPN", "Android", "DNS", "Mock location", "Image resizer"]
 
 def get_articles():
     try:
@@ -41,7 +29,8 @@ def get_articles():
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
             if title and link:
-                articles.append({"title": title, "link": link})
+                clean_title = title.replace("AntiAtlasDev", "").replace("Anti Atlas Dev", "").strip()
+                articles.append({"title": clean_title, "link": link})
         return articles
     except Exception as e:
         print("RSS error:", e)
@@ -55,6 +44,19 @@ def load_json(filename, default):
 
 def save_json(filename, data):
     with open(filename, "w") as f: json.dump(data, f, indent=2)
+
+def commit_history():
+    try:
+        subprocess.run(["git", "config", "user.name", "Bot"], check=True)
+        subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
+        subprocess.run(["git", "add", HISTORY_FILE, STATE_FILE], check=True)
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        if result.returncode == 1:
+            subprocess.run(["git", "commit", "-m", "Update Threads history"], check=True)
+            subprocess.run(["git", "push", "origin", "main"], check=True)
+            print("History saved to GitHub.")
+    except Exception as e:
+        print(f"Git error: {e}")
 
 def get_daily_state():
     today = datetime.now(timezone.utc).date().isoformat()
@@ -86,7 +88,6 @@ def search_and_reply():
                 username = post.get("username")
                 post_id = post.get("id")
                 
-                # التأكد من وجود بيانات صالحة
                 if not username or not post_id or username == "antiatlasdev":
                     continue
 
@@ -148,28 +149,32 @@ if __name__ == "__main__":
     print("AntiAtlasDev Threads Bot")
     state = get_daily_state()
     
+    # 1. محاولة الردود (إذا لم نصل للحد اليومي)
     if state["replies_count"] < MAX_REPLIES_DAILY:
         new_replies = search_and_reply()
         state["replies_count"] += new_replies
         save_json(STATE_FILE, state)
 
+    # 2. النشر
     if state["posts_count"] < MAX_POSTS_DAILY:
         articles = get_articles()
         history = load_json(HISTORY_FILE, [])
+        
         article = next((a for a in articles if a["link"] not in history), None)
         
         if article:
-            draft = f"Discover {article['title']} from AntiAtlasDev!\n\nRead more:\n{article['link']}"
+            draft = f"📱 New App: {article['title']}\n\nRead more here:\n{article['link']}\n\n#Android #AppDevelopment"
             if publish_post(draft):
                 history.append(article["link"])
                 save_json(HISTORY_FILE, history)
                 state["posts_count"] += 1
         else:
-            print("No new articles. Recycling...")
+            print("No new articles. Recycling an old one (Flashback)...")
             recycled = random.choice(articles)
-            draft = f"🔄 Flashback: {recycled['title']}\n\nRead more:\n{recycled['link']}"
+            draft = f"🔄 Flashback: {recycled['title']}\n\nRead more here:\n{recycled['link']}\n\n#Android #AppDevelopment"
             if publish_post(draft):
                 state["posts_count"] += 1
 
     save_json(STATE_FILE, state)
+    commit_history()
     print(f"Finished. Posts: {state['posts_count']}, Replies: {state['replies_count']}")
