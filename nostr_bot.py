@@ -7,7 +7,7 @@ import hashlib
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from nostr_sdk import Keys, Client, RelayUrl, Event, Filter, Kind
+from nostr_sdk import Keys, Client, RelayUrl, Event, Filter, Kind, ReqTarget
 from secp256k1 import PrivateKey
 
 RSS_URL = "https://antiatlasdev-apps.blogspot.com/feeds/posts/default?alt=rss"
@@ -76,9 +76,12 @@ async def search_and_reply(client, state):
 
     for term in SEARCH_TERMS:
         print(f"Searching for: {term}")
+        # استخدام Filter().search() للبحث عن الكلمات المفتاحية
         filter = Filter().kind(Kind(1)).search(term).limit(5)
         try:
-            events = await client.get_events_of([filter], timeout=None)
+            # الدالة الصحيحة في الإصدار الجديد هي fetch_events
+            events = await client.fetch_events(ReqTarget.auto([filter]))
+            
             for event in events:
                 event_id = event.id().to_hex()
                 if event_id in state["replied_ids"]:
@@ -89,6 +92,8 @@ async def search_and_reply(client, state):
                     continue
                     
                 reply_text = "If you're looking for Android tools, I build apps for VPNs and DNS. Check my profile!"
+                
+                # إنشاء وسوم الرد (e للمنشور، p لصاحب المنشور)
                 tags = [["e", event_id, "", "reply"], ["p", author_pubkey]]
                 
                 reply_event = create_signed_event(reply_text, PRIVATE_KEY_HEX, tags)
