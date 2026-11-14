@@ -22,9 +22,8 @@ def get_articles():
             link = item.findtext("link", default="").strip()
             desc_html = item.findtext("description", default="")
             
-            # تنظيف الوصف من وسوم HTML
             desc_text = re.sub(r'<[^>]+>', '', unescape(desc_html or ""))
-            desc_text = " ".join(desc_text.split())[:200] # أول 200 حرف
+            desc_text = " ".join(desc_text.split())[:200]
             
             if title and link:
                 articles.append({"title": title, "link": link, "desc": desc_text})
@@ -47,7 +46,6 @@ def publish_to_telegraph(article):
     if not ACCESS_TOKEN:
         raise RuntimeError("TELEGRAPH_ACCESS_TOKEN is missing.")
 
-    # بناء محتوى الصفحة (وصف + رابط)
     content = [
         {"tag": "p", "children": [article["desc"] + "..."]},
         {"tag": "p", "children": ["Read the full article on AntiAtlasDev:"]},
@@ -75,8 +73,17 @@ def publish_to_telegraph(article):
         print(f"Telegraph API Error: {data.get('error')}")
         return None
         
-    print("✅ Published successfully:", data["result"]["url"])
-    return data["result"]["url"]
+    page_url = data["result"]["url"]
+    print("✅ Published successfully:", page_url)
+    
+    # --- إضافة الرابط إلى ملخص التشغيل ---
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a") as f:
+            f.write(f"### ✅ Published: [{article['title']}]({page_url})\n")
+    # ------------------------------------
+
+    return page_url
 
 def commit_history():
     try:
@@ -108,3 +115,8 @@ if __name__ == "__main__":
             commit_history()
     else:
         print("No new articles to publish.")
+        # إضافة رسالة إلى الملخص حتى لو لم يوجد جديد
+        summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_file:
+            with open(summary_file, "a") as f:
+                f.write("### ℹ️ No new articles to publish today.\n")
