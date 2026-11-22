@@ -1,28 +1,41 @@
 name: Facebook Bot
+
 on:
   workflow_dispatch:
   schedule:
-  - cron: '0 * * * *' # كل ساعة
+    - cron: '0 */3 * * *' # يعمل كل 3 ساعات
+
 permissions:
-  contents: write
+  contents: write # ضروري جداً لحفظ السجل في GitHub
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true # ضروري لاستخدام التوكن في الـ push
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests
-      - run: python facebook_bot.py
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run bot
+        run: python facebook_bot.py
         env:
           FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
           FACEBOOK_PAGE_TOKEN: ${{ secrets.FACEBOOK_PAGE_TOKEN }}
+
       - name: Commit history
         run: |
-          git config user.name "Bot"
-          git config user.email "bot@example.com"
+          git config user.name "AntiAtlasDev Bot"
+          git config user.email "bot@antiatlasdev.com"
           git add facebook_used_articles.json || true
-          git commit -m "Update Facebook history" || echo "No changes"
-          git pull --rebase origin main || echo "Pull failed"
-          git push origin main || echo "Push failed"
+          git commit -m "Update Facebook history" || echo "No changes to commit"
+          git pull --rebase origin main || echo "Pull failed, continuing..."
+          git push origin main || echo "Push failed, continuing..."
