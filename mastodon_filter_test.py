@@ -3,12 +3,13 @@ import re
 import html
 import time
 import requests
-from datetime import datetime, timezone, timedelta
+import xml.etree.ElementTree as ET
+import json
 import subprocess
+from datetime import datetime, timezone
 
-# ⚠️ ضع اسم الخادم الجديد هنا (بدون https://)
-# مثال: "mastodon.online" أو "mstdn.social"
-MASTODON_INSTANCE = "YOUR_MASTODON_INSTANCE" 
+# ✅ تم تعديل اسم الخادم إلى mstdn.social
+MASTODON_INSTANCE = "mstdn.social" 
 API = f"https://{MASTODON_INSTANCE}"
 TOKEN = os.getenv("MASTODON_ACCESS_TOKEN")
 
@@ -24,12 +25,6 @@ SEARCH_TERMS = ["VPN", "DNS", "Android", "Mock location", "Image resizer"]
 
 def headers():
     return {"Authorization": f"Bearer {TOKEN}"}
-
-def clean_text(value):
-    value = html.unescape(value or "")
-    value = re.sub(r"<[^>]+>", " ", value)
-    value = re.sub(r"https?://\S+", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
 
 def get_account():
     response = requests.get(
@@ -167,5 +162,4 @@ def main():
     print(f"Finished. Posts: {state['posts_count']}, Replies: {state['replies_count']}")
 
 if __name__ == "__main__":
-    import xml.etree.ElementTree as ET
     main()
