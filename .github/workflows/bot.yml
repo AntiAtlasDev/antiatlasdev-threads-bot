@@ -3,10 +3,10 @@ name: Threads Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *' # يعمل كل ساعة
+    - cron: '0 */3 * * *' # يعمل كل 3 ساعات
 
 permissions:
-  contents: write
+  contents: write # ضروري جداً لحفظ السجل في GitHub
 
 jobs:
   run-bot:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: true # ضروري لاستخدام التوكن في الـ push
 
       - name: Set up Python
         uses: actions/setup-python@v5
