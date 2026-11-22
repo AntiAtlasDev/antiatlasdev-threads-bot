@@ -3,18 +3,28 @@ name: Tumblr Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *' # كل 6 ساعات (آمن جداً)
+    - cron: '0 */3 * * *' # يعمل كل 3 ساعات
+
+permissions:
+  contents: write # ضروري جداً لحفظ السجل في GitHub
 
 jobs:
   reblog:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true # ضروري لاستخدام التوكن في الـ push
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
         run: pip install requests-oauthlib
+
       - name: Run Tumblr Bot
         env:
           TUMBLR_CONSUMER_KEY: ${{ secrets.TUMBLR_CONSUMER_KEY }}
