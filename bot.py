@@ -1,15 +1,12 @@
 
 import os
-import re
 import json
 import time
 import random
 import requests
-
 import xml.etree.ElementTree as ET
 
 from datetime import datetime, timezone
-from urllib.parse import quote
 
 
 # ==========================================
@@ -34,7 +31,6 @@ MY_USERNAME = "antiatlasdev_apps"
 
 MAX_POSTS_DAILY = 3
 MAX_REPLIES_DAILY = 5
-
 MAX_REPLIES_PER_RUN = 1
 
 MAX_POST_AGE_HOURS = 168
@@ -48,12 +44,9 @@ SEARCH_QUERIES = [
     "Android apps"
 ]
 
-USER_AGENT = "facebookexternalhit/1.1"
-
-SCRIPT_PATTERN = re.compile(
-    r'<script[^>]*type="application/json"[^>]*>'
-    r'(.*?)</script>',
-    re.S
+SEARCH_FIELDS = (
+    "id,text,username,timestamp,permalink,"
+    "media_type,has_replies,is_quote_post,is_reply"
 )
 
 
@@ -167,173 +160,96 @@ def get_articles():
 
 
 # ==========================================
-# THREADS PUBLIC SEARCH PAGE PARSER
+# OFFICIAL THREADS KEYWORD SEARCH
 # ==========================================
 
-def collect_posts(node, posts, depth=0):
+def search_threads(query):
 
-    if depth > 35 or node is None:
-        return
+    search_url = f"{THREADS_API}/keyword_search"
 
-    if isinstance(node, list):
-
-        for item in node:
-            collect_posts(item, posts, depth + 1)
-
-    elif isinstance(node, dict):
-
-        code = node.get("code")
-        pk = node.get("pk")
-
-        caption = node.get("caption")
-
-        if (
-            isinstance(code, str)
-            and pk is not None
-            and caption is not None
-            and (
-                "taken_at" in node
-                or "like_count" in node
-            )
-        ):
-
-            existing = posts.get(code)
-
-            if (
-                existing is None
-                or len(json.dumps(node))
-                > len(json.dumps(existing))
-            ):
-                posts[code] = node
-
-        for value in node.values():
-            collect_posts(value, posts, depth + 1)
-
-
-def fetch_search_view(query, view):
-
-    url = (
-        "https://www.threads.com/search"
-        f"?q={quote(query)}"
-        f"&serp_type={view}"
-    )
-
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept-Language": "en-US,en;q=0.9"
+    params = {
+        "q": query,
+        "search_type": "RECENT",
+        "fields": SEARCH_FIELDS,
+        "access_token": ACCESS_TOKEN
     }
 
     try:
 
         response = requests.get(
-            url,
-            headers=headers,
+            search_url,
+            params=params,
             timeout=30
         )
 
         print(
-            f"Search page [{view}] HTTP:",
+            f"Search [{query}] HTTP:",
             response.status_code
         )
 
-        response.raise_for_status()
+        if not response.ok:
 
-        posts = {}
+            print("SEARCH ERROR:")
+            print(response.text[:1500])
 
-        for block in SCRIPT_PATTERN.findall(response.text):
+            return []
 
-            try:
+        data = response.json()
 
-                data = json.loads(block)
-
-                collect_posts(data, posts)
-
-            except (ValueError, TypeError):
-                continue
+        results = data.get("data", [])
 
         print(
-            f"Search [{query}] [{view}]:",
-            len(posts),
-            "posts"
+            f"Results found for [{query}]:",
+            len(results)
         )
 
-        return list(posts.values())
+        return results
 
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
 
-        print("Search page request error:", repr(e))
+        print("SEARCH ERROR:", repr(e))
 
         return []
 
 
-def fetch_public_posts(query):
-
-    collected = {}
-
-    for view in ("recent", "default"):
-
-        results = fetch_search_view(
-            query,
-            view
-        )
-
-        for post in results:
-
-            code = post.get("code")
-
-            if code:
-                collected[code] = post
-
-        time.sleep(2)
-
-    return list(collected.values())
-
-
 # ==========================================
-# NORMALIZE PUBLIC POSTS
+# NORMALIZE POSTS
 # ==========================================
 
 def normalize_post(post, query):
 
-    user = post.get("user") or {}
+    post_id = post.get("id")
+    username = post.get("username", "")
+    text = post.get("text", "")
+    timestamp = post.get("timestamp", "")
 
-    caption = post.get("caption") or {}
-
-    username = user.get("username", "")
-
-    text = caption.get("text", "")
-
-    post_id = post.get("pk")
-
-    code = post.get("code")
-
-    timestamp = post.get("taken_at", 0)
-
-    if isinstance(post_id, int):
-        post_id = str(post_id)
-
-    if not isinstance(post_id, str):
-        return None
-
-    if not username or not code:
+    if not post_id or not username:
         return None
 
     if not isinstance(text, str):
         text = ""
 
-    if not isinstance(timestamp, (int, float)):
+    try:
+
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(
+                timestamp.replace("Z", "+00:00")
+            ).timestamp()
+
+        elif not isinstance(timestamp, (int, float)):
+            timestamp = 0
+
+    except Exception:
         timestamp = 0
 
+    url = post.get("permalink", "")
+
     return {
-        "id": post_id,
-        "code": code,
+        "id": str(post_id),
         "username": username,
         "text": text,
         "timestamp": timestamp,
-        "url": (
-            f"https://www.threads.com/"
-            f"@{username}/post/{code}"
-        ),
+        "url": url,
         "query": query
     }
 
@@ -444,9 +360,7 @@ def publish_reply(post, reply_text):
 
         return False
 
-    print(
-        f"Preparing reply to @{post['username']}"
-    )
+    print(f"Preparing reply to @{post['username']}")
 
     create_url = f"{THREADS_API}/{USER_ID}/threads"
 
@@ -470,7 +384,7 @@ def publish_reply(post, reply_text):
             response.status_code
         )
 
-        if response.status_code != 200:
+        if not response.ok:
 
             print("REPLY CREATION ERROR:")
             print(response.text[:2000])
@@ -492,14 +406,12 @@ def publish_reply(post, reply_text):
             f"{USER_ID}/threads_publish"
         )
 
-        publish_payload = {
-            "creation_id": creation_id,
-            "access_token": ACCESS_TOKEN
-        }
-
         publish_response = requests.post(
             publish_url,
-            data=publish_payload,
+            data={
+                "creation_id": creation_id,
+                "access_token": ACCESS_TOKEN
+            },
             timeout=30
         )
 
@@ -508,7 +420,7 @@ def publish_reply(post, reply_text):
             publish_response.status_code
         )
 
-        if publish_response.status_code == 200:
+        if publish_response.ok:
 
             print(
                 f"SUCCESS: Replied to @{post['username']}"
@@ -536,7 +448,7 @@ def publish_reply(post, reply_text):
 
 def search_and_reply():
 
-    print("\n========== PUBLIC THREADS SEARCH ==========")
+    print("\n========== THREADS KEYWORD SEARCH ==========")
 
     if not ACCESS_TOKEN or not USER_ID:
 
@@ -561,7 +473,7 @@ def search_and_reply():
 
         print("\nSearching:", query)
 
-        results = fetch_public_posts(query)
+        results = search_threads(query)
 
         for raw_post in results:
 
@@ -573,7 +485,11 @@ def search_and_reply():
             if not post:
                 continue
 
-            username = post["username"].lower().lstrip("@")
+            username = (
+                post["username"]
+                .lower()
+                .lstrip("@")
+            )
 
             if username == MY_USERNAME.lower():
                 continue
@@ -591,16 +507,11 @@ def search_and_reply():
 
         time.sleep(3)
 
-    print(
-        "\nEligible posts:",
-        len(candidates)
-    )
+    print("\nEligible posts:", len(candidates))
 
     if not candidates:
 
-        print(
-            "No new eligible public posts found."
-        )
+        print("No new eligible posts found.")
 
         return 0
 
@@ -643,7 +554,7 @@ def search_and_reply():
 
             print(
                 "Reply was not published. "
-                "Post will remain eligible for retry."
+                "Post remains eligible for retry."
             )
 
         time.sleep(15)
@@ -686,7 +597,7 @@ def publish_post(text):
             timeout=30
         )
 
-        if response.status_code != 200:
+        if not response.ok:
 
             print("POST CREATE ERROR:")
             print(response.text[:2000])
@@ -696,7 +607,9 @@ def publish_post(text):
         creation_id = response.json().get("id")
 
         if not creation_id:
+
             print("Missing creation ID.")
+
             return False
 
         time.sleep(5)
@@ -715,7 +628,7 @@ def publish_post(text):
             timeout=30
         )
 
-        if publish_response.status_code == 200:
+        if publish_response.ok:
 
             print("Blog post published successfully.")
 
