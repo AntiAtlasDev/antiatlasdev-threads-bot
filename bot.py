@@ -31,6 +31,7 @@ MY_USERNAME = "antiatlasdev_apps"
 
 MAX_POSTS_DAILY = 3
 MAX_REPLIES_DAILY = 5
+
 MAX_REPLIES_PER_RUN = 1
 
 MAX_POST_AGE_HOURS = 168
@@ -232,14 +233,17 @@ def normalize_post(post, query):
     try:
 
         if isinstance(timestamp, str):
+
             timestamp = datetime.fromisoformat(
                 timestamp.replace("Z", "+00:00")
             ).timestamp()
 
         elif not isinstance(timestamp, (int, float)):
+
             timestamp = 0
 
     except Exception:
+
         timestamp = 0
 
     url = post.get("permalink", "")
@@ -360,7 +364,9 @@ def publish_reply(post, reply_text):
 
         return False
 
-    print(f"Preparing reply to @{post['username']}")
+    print(
+        f"Preparing reply to @{post['username']}"
+    )
 
     create_url = f"{THREADS_API}/{USER_ID}/threads"
 
@@ -443,7 +449,7 @@ def publish_reply(post, reply_text):
 
 
 # ==========================================
-# SEARCH AND REPLY
+# SEARCH AND REPLY WITH DIAGNOSTICS
 # ==========================================
 
 def search_and_reply():
@@ -483,6 +489,13 @@ def search_and_reply():
             )
 
             if not post:
+
+                print("[SKIP] Invalid post data:")
+                print(json.dumps(
+                    raw_post,
+                    ensure_ascii=False
+                )[:1500])
+
                 continue
 
             username = (
@@ -491,23 +504,81 @@ def search_and_reply():
                 .lstrip("@")
             )
 
+            text = post["text"]
+            timestamp = post["timestamp"]
+
+            print("\n--------------------------------")
+            print("Username:", username)
+            print("Post ID:", post["id"])
+            print("Text:", text[:300])
+            print("Timestamp:", timestamp)
+            print("URL:", post["url"])
+
+            # 1. Ignore own account
+
             if username == MY_USERNAME.lower():
+
+                print("[SKIP] Own account")
+
                 continue
+
+            # 2. Ignore already replied posts
 
             if post["id"] in replied_set:
+
+                print("[SKIP] Already replied")
+
                 continue
+
+            # 3. Check timestamp
+
+            if not timestamp:
+
+                print("[SKIP] Missing timestamp")
+
+                continue
+
+            age_hours = (
+                datetime.now(timezone.utc).timestamp()
+                - timestamp
+            ) / 3600
+
+            print(
+                "Post age:",
+                round(age_hours, 2),
+                "hours"
+            )
 
             if not is_recent(post):
+
+                print(
+                    "[SKIP] Post is outside "
+                    "the allowed age"
+                )
+
                 continue
 
+            # 4. Check relevance
+
             if not is_relevant(post):
+
+                print(
+                    "[SKIP] No relevant keyword "
+                    "in post text"
+                )
+
                 continue
+
+            print("[ELIGIBLE] Post passed all filters")
 
             candidates[post["id"]] = post
 
         time.sleep(3)
 
-    print("\nEligible posts:", len(candidates))
+    print(
+        "\nEligible posts:",
+        len(candidates)
+    )
 
     if not candidates:
 
@@ -553,8 +624,7 @@ def search_and_reply():
         else:
 
             print(
-                "Reply was not published. "
-                "Post remains eligible for retry."
+                "[ERROR] Reply was not published."
             )
 
         time.sleep(15)
@@ -749,3 +819,4 @@ if __name__ == "__main__":
     print("Posts:", state["posts_count"])
     print("Replies:", state["replies_count"])
     print("================================")
+    
